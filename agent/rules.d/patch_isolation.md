@@ -1,5 +1,5 @@
 # Patch Isolation Rules
-*Loaded when: multiple patch intentions detected in one request.*
+*Loaded when: request contains 2+ of these verbs: fix · refactor · add · update · rename.*
 
 Each patch = ONE semantic intention only:
 - `bugfix` — fix broken behavior

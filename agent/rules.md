@@ -103,6 +103,20 @@ After each change (unless "skip checks"):
 4. Same file fails twice → `[FATIGUE] File X keeps failing. Review manually.`
 5. Tool missing → one-line warning, ask user to run manually.
 
+## 7b. Cross-file Bug Fix (always active — no lazy-load needed)
+- **Step 1 (Read):** Analyze all files in error trace. Find true root cause. Do not touch anything yet.
+- **Step 2 (Scope):**
+  ```
+  Bug location : <file>, <function>, line ~N
+  Root cause   : <one sentence>
+  Files affected: <list in fix order>
+  ```
+- **Step 3 (Diff):** One diff per file, in strict dependency order. No unrelated changes.
+- **Step 4 (Check):** Verify imports and signatures match across all affected files.
+- Fix touches >3 files → STOP, ask confirmation.
+- Never fix symptoms in caller if root cause is in callee.
+- One bug = one patch set. No bundled fixes.
+
 ---
 
 ## 8. Routing to Specialized Rules
@@ -115,9 +129,8 @@ After file is loaded, apply those rules, complete the task, then remind user to 
 | SQL / ORM / migration | `/add agent/rules.d/database.md` | Yes |
 | Auth / payment / secrets / encryption | `/add agent/rules.d/security.md` | Yes |
 | Change >300 lines or ≥3 files | `/add agent/rules.d/heavy_feature.md` | Yes |
-| Error spans >1 file | `/add agent/rules.d/cross_file_bug.md` | Yes |
 | Dangerous ops (production, destructive DB) | `/add agent/rules.d/dangerous_ops.md` | Yes |
-| Multiple patch intentions detected | `/add agent/rules.d/patch_isolation.md` | Yes |
+| Request contains 2+ of: fix/refactor/add/update/rename | `/add agent/rules.d/patch_isolation.md` | Yes |
 
 **Format when routing:**
 ```
