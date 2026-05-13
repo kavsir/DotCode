@@ -88,4 +88,4 @@ Chi tiết từng giai đoạn xem tại [`docs/update.md`](docs/update.md).
 
 ## License
 
-MIT
+[MIT + Commons Clause](LICENSE) — free to use, not for sale.
