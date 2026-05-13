@@ -7,7 +7,7 @@ editor-edit-format: diff
 architect: true
 auto-accept-architect: true
 
-map-tokens: 20000
+map-tokens: 5000
 map-refresh: auto
 
 cache-prompts: true

@@ -15,6 +15,12 @@ echo [INFO] Agent directory: %AGENT_DIR%
 echo.
 
 :: =========================
+:: Reload PATH từ registry — không cần restart terminal
+:: =========================
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set PATH=%%B;%PATH%
+for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set PATH=%%B;%PATH%
+
+:: =========================
 :: STEP 1 — Kiểm tra Python
 :: =========================
 echo [1/4] Checking Python...
@@ -39,13 +45,16 @@ echo [2/4] Checking Aider...
 aider --version >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Aider not found. Installing...
-    pip install aider-chat
+    python -m pip install aider-chat
     if errorlevel 1 (
         echo [ERROR] Aider install failed.
-        echo         Thu chay thu cong: pip install aider-chat
+        echo         Thu chay thu cong: python -m pip install aider-chat
         pause
         exit /b 1
     )
+    :: Reload lại PATH sau khi cài để nhận aider ngay
+    for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set PATH=%%B;%PATH%
+    for /f "tokens=*" %%p in ('python -c "import site; print(site.getusersitepackages().replace('site-packages','Scripts'))"') do set PATH=%PATH%;%%p
     echo [OK] Aider installed.
 ) else (
     for /f "tokens=*" %%v in ('aider --version 2^>^&1') do set AIDER_VER=%%v
@@ -57,6 +66,10 @@ echo.
 :: STEP 3 — Kiểm tra DEEPSEEK_API_KEY
 :: =========================
 echo [3/4] Checking DEEPSEEK_API_KEY...
+
+:: Reload KEY từ registry nếu terminal chưa nhận
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v DEEPSEEK_API_KEY 2^>nul') do set DEEPSEEK_API_KEY=%%B
+
 if "%DEEPSEEK_API_KEY%"=="" (
     echo [ERROR] DEEPSEEK_API_KEY not found.
     echo.
@@ -77,12 +90,12 @@ echo.
 :: =========================
 echo [4/4] Adding Agent_Code to PATH...
 
-:: Kiểm tra đã có trong PATH chưa
 echo %PATH% | findstr /i /c:"%AGENT_DIR%" >nul
 if not errorlevel 1 (
     echo [OK] Already in PATH. Skipping.
 ) else (
     setx PATH "%PATH%;%AGENT_DIR%"
+    set PATH=%PATH%;%AGENT_DIR%
     echo [OK] Added to PATH: %AGENT_DIR%
 )
 echo.
@@ -94,7 +107,7 @@ echo ============================================
 echo   Setup complete!
 echo ============================================
 echo.
-echo   Restart terminal, sau do go "AI" o bat ky
-echo   thu muc nao de bat dau.
+echo   Go "AI" o bat ky thu muc nao de bat dau.
+echo   (Khong can restart terminal)
 echo.
 pause

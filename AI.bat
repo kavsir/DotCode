@@ -44,8 +44,7 @@ set PYTHONUTF8=1
 
 aider ^
   --config "%CONFIG_FILE%" ^
+  --read "%AGENT_DIR%\agent\rules.md" ^
   --input-history-file "Aider\.aider.input.history-%CURRENT_FOLDER%" ^
-  --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md" ^
-  --cache-dir "Aider\.aider.cache"
-
+  --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md"
 pause
