@@ -1,0 +1,30 @@
+model: openai/deepseek-v4-flash
+
+openai-api-base: https://api.deepseek.com
+
+editor-edit-format: diff
+
+architect: true
+auto-accept-architect: true
+
+map-tokens: 20000
+map-refresh: auto
+
+cache-prompts: true
+cache-keepalive-pings: 5
+
+auto-commits: false
+dirty-commits: false
+attribute-author: false
+
+# Relative path — hoạt động dù clone về ổ đĩa nào
+read:
+  - "agent/rules.md"
+
+show-diffs: true
+show-model-warnings: false
+suggest-shell-commands: false
+
+stream: true
+detect-urls: false
+analytics: false

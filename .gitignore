@@ -1,0 +1,13 @@
+# Runtime data
+memory/.index/
+observability/logs/
+
+# Aider per-machine
+.aider.input.history*
+.aider.chat.history*
+.aider.tags.cache.v3/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

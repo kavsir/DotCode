@@ -1,0 +1,19 @@
+# Loại bỏ thư mục build và thư viện
+node_modules/
+dist/
+build/
+out/
+
+# Loại bỏ cache của Python và môi trường ảo
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Loại bỏ các file log và dữ liệu tạm
+*.log
+.DS_Store
+
+Aider/
+.aider*
