@@ -1,19 +1,45 @@
-# Loại bỏ thư mục build và thư viện
-node_modules/
-dist/
-build/
-out/
+# ================================
+# AIDERIGNORE — DotCode
+# Chặn Aider đọc file không cần thiết
+# ================================
 
-# Loại bỏ cache của Python và môi trường ảo
+# Aider cache & history
+Aider/
+.aider*
+
+# Python
 __pycache__/
 *.pyc
 .venv/
 venv/
 env/
 
-# Loại bỏ các file log và dữ liệu tạm
-*.log
-.DS_Store
+# Build & package
+node_modules/
+dist/
+build/
+out/
 
-Aider/
-.aider*
+# OS
+.DS_Store
+*.log
+
+# ================================
+# DotCode — Placeholder folders
+# Chưa implement, không cần đọc
+# ================================
+runtime/
+tools/
+memory/
+evaluation/
+observability/
+safety/
+loop/
+multi_agent/
+
+# ================================
+# Docs dài — không cần khi coding
+# ================================
+docs/update.md
+docs/architecture.md
+agent/.system-map.stages.md

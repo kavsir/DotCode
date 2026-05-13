@@ -1,13 +1,65 @@
-# Runtime data
+# ================================
+# GITIGNORE — DotCode
+# ================================
+
+# ================================
+# Runtime data — tự sinh khi chạy
+# ================================
 memory/.index/
 observability/logs/
 
-# Aider per-machine
+# ================================
+# Aider — per-machine, không commit
+# ================================
 .aider.input.history*
 .aider.chat.history*
 .aider.tags.cache.v3/
+Aider/
 
+# ================================
 # Python
+# ================================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ================================
+# Môi trường & secrets
+# ================================
+.env
+.env.*
+*.key
+secrets.yml
+secrets.yaml
+
+# ================================
+# Editor & OS
+# ================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/settings.json
+.idea/
+
+# ================================
+# Future stages — khi mở rộng
+# ================================
+
+# GĐ 4 — vector embeddings (file lớn)
+memory/vector_store/*.bin
+memory/embeddings/*.pkl
+
+# GĐ 6 — observability data
+observability/traces/*.json
+observability/metrics/*.json
+
+# GĐ 7 — sandbox temp files
+safety/sandbox/tmp/
