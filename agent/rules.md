@@ -37,19 +37,20 @@ Apply these principles before any code. They override all specific instructions 
 1. [Step] → verify: [check]
 2. [Step] → verify: [check]
 ```
-
 - Strong criteria let you loop independently. Weak criteria require constant clarification.
 
 ---
 
 ## 1. Input Triage (Unified)
 Run in order. **If multiple triggers match, highest severity executes first.**
-Same severity → table order (E → G → D → A → B → C → F).
+Same severity → table order (H → I → E → G → D → A → B → C → F).
 
-**Severity:** E = G > D > A > B > C > F
+**Severity:** H = I = E = G > D > A > B > C > F
 
 | # | Sev | Trigger | Action |
 |---|-----|---------|--------|
+| H | Critical | Input starts with `@grill` or `/grill` | Load `rules.d/grill.md`. Drill with questions until user says "proceed" or "enough". |
+| I | Critical | Input starts with `@caveman` or `/caveman` | Load `rules.d/caveman.md`. Ultra‑token mode for session (until `@normal`). |
 | E | Critical | Delete/modify module marked `core`/`critical` in map | `[WARNING] Core module. Dependents: N. Proceed? [y/N]` |
 | G | Critical | `import X` not in `requirements.txt` or map | "Library X missing. 1. Add to requirements.txt + instruct pip install  2. Use stdlib only." If option 1: edit `requirements.txt` via diff, then instruct user to run `pip install -r requirements.txt` and confirm. |
 | D | High | "all/every/perfect/never fail" OR >10 files | "Exceeds capacity. Smaller steps: [2–3]. Start step 1?" → declines → ABORT. |
@@ -97,25 +98,24 @@ Same severity → table order (E → G → D → A → B → C → F).
 ```
 Need files: [1] a.py [2] b.py. Add all? [y] yes [n] cancel [e] pick manually
 ```
-
 `y` → `/add` commands; `e` → user picks numbers; `n` → stop.
 - **Full vs partial:** If a file is only in context as a snippet (user copy-pasted) and you need the whole file → ask: "Please `/add filename.py`". Do not `/add` if the full file is already in context.
 - **Large files (>200 lines):** If only a small section needs editing → ask: "File X is large. Please copy-paste the specific function/class, or `/add` the whole file (token cost applies)."
 - **File split:** Propose splitting new files >200 lines, unless user declines.
 - **Cleanup:** Remove only dead code, unused imports, stale comments that **your changes** introduced. Do not clean pre-existing dead code.
 - **Memory Tiering (priority):**
-1. `.system-map.md` — immutable architecture
-2. Current task + latest user instruction
-3. Current file being edited
-4. Directly imported neighbors
-5. Last 3 relevant turns
-6. Inferred assumptions → mark `[assume]`
+  1. `.system-map.md` — immutable architecture
+  2. Current task + latest user instruction
+  3. Current file being edited
+  4. Directly imported neighbors
+  5. Last 3 relevant turns
+  6. Inferred assumptions → mark `[assume]`
 - **Conflict (Tier 1 overrides Tier 2 only for core violations):**
-- Delete/modify a `core`/`critical` module
-- Bypass a security rule (hardcode credentials)
-- Change a public API without updating dependent files (if dependency info available in map)
-- Otherwise Tier 2 (user instruction) wins.
-→ `[CONFLICT] User wants X, map says Y. Proceed? [y/N]`
+  - Delete/modify a `core`/`critical` module
+  - Bypass a security rule (hardcode credentials)
+  - Change a public API without updating dependent files (if dependency info available in map)
+  - Otherwise Tier 2 (user instruction) wins.
+  → `[CONFLICT] User wants X, map says Y. Proceed? [y/N]`
 - No whole-repo scans. Do not regenerate unchanged code.
 
 ---
@@ -146,9 +146,9 @@ Need files: [1] a.py [2] b.py. Add all? [y] yes [n] cancel [e] pick manually
 ## 8. Verification & Failure Budget
 After each change (unless user says "skip checks"):
 1. Suggest ONE verification command (first applicable):
- - Test file exists → `pytest path/to/test.py`
- - `ruff check <file>`
- - `python -m py_compile <file>`
+   - Test file exists → `pytest path/to/test.py`
+   - `ruff check <file>`
+   - `python -m py_compile <file>`
 2. Ask user: "Please run the command and paste the result (pass / fail + error output)."
 3. User reports failure + error → **ONE auto-fix** → ask user to re-run.
 4. Still failing → stop, report exact error, suggest rollback: `git checkout -- <file>` (if git) or undo manually. Do not leave partial changes.
@@ -184,6 +184,9 @@ When context matches, apply rules from the corresponding file:
 
 | Context | Apply rules from |
 |---------|------------------|
+| User types `@grill` | `rules.d/grill.md` (triggered via section 0) |
+| User types `@caveman` | `rules.d/caveman.md` (triggered via section 0) |
+| Debugging multi‑file error or user says `@diagnose` | `rules.d/diagnose.md` (overrides core section 8b) |
 | `async def` / `await` in code | `rules.d/async.md` |
 | SQL / ORM / migration | `rules.d/database.md` |
 | Auth / payment / secrets / encryption | `rules.d/security.md` |

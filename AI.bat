@@ -51,7 +51,9 @@ aider ^
   --read "%AGENT_DIR%\agent\rules.d\heavy_feature.md" ^
   --read "%AGENT_DIR%\agent\rules.d\dangerous_ops.md" ^
   --read "%AGENT_DIR%\agent\rules.d\patch_isolation.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\grill.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\caveman.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\diagnose.md" ^
   --input-history-file "Aider\.aider.input.history-%CURRENT_FOLDER%" ^
   --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md"
-
 pause
