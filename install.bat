@@ -1,9 +1,9 @@
 @echo off
-title Agent_Code — Installer
+title DotCode — Installer
 chcp 65001 >nul
 
 echo ============================================
-echo   Agent_Code — Setup
+echo   DotCode — Setup
 echo ============================================
 echo.
 
@@ -52,9 +52,9 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
-    :: Reload lại PATH sau khi cài để nhận aider ngay
+    :: Reload PATH từ registry sau khi cài để nhận aider ngay
     for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set PATH=%%B;%PATH%
-    for /f "tokens=*" %%p in ('python -c "import site; print(site.getusersitepackages().replace('site-packages','Scripts'))"') do set PATH=%PATH%;%%p
+    for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set PATH=%%B;%PATH%
     echo [OK] Aider installed.
 ) else (
     for /f "tokens=*" %%v in ('aider --version 2^>^&1') do set AIDER_VER=%%v
@@ -86,15 +86,20 @@ echo [OK] DEEPSEEK_API_KEY found.
 echo.
 
 :: =========================
-:: STEP 4 — Thêm Agent_Code vào PATH
+:: STEP 4 — Thêm DotCode vào PATH
 :: =========================
-echo [4/4] Adding Agent_Code to PATH...
+echo [4/4] Adding DotCode to PATH...
 
-echo %PATH% | findstr /i /c:"%AGENT_DIR%" >nul
+:: Đọc PATH hiện tại từ registry
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set CURRENT_USER_PATH=%%B
+
+:: Kiểm tra đã có chưa
+echo %CURRENT_USER_PATH% | findstr /i /c:"%AGENT_DIR%" >nul
 if not errorlevel 1 (
     echo [OK] Already in PATH. Skipping.
 ) else (
-    setx PATH "%PATH%;%AGENT_DIR%"
+    :: Dùng reg add thay setx — tránh giới hạn 1024 ký tự
+    reg add "HKCU\Environment" /v PATH /t REG_EXPAND_SZ /d "%CURRENT_USER_PATH%;%AGENT_DIR%" /f >nul
     set PATH=%PATH%;%AGENT_DIR%
     echo [OK] Added to PATH: %AGENT_DIR%
 )

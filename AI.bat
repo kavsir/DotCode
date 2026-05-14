@@ -1,5 +1,5 @@
 @echo off
-title DeepSeek Coding Agent
+title DotCode — AI Agent
 chcp 65001 >nul
 
 :: =========================
@@ -45,6 +45,13 @@ set PYTHONUTF8=1
 aider ^
   --config "%CONFIG_FILE%" ^
   --read "%AGENT_DIR%\agent\rules.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\async.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\database.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\security.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\heavy_feature.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\dangerous_ops.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\patch_isolation.md" ^
   --input-history-file "Aider\.aider.input.history-%CURRENT_FOLDER%" ^
   --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md"
+
 pause
