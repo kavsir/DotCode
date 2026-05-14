@@ -9,3 +9,4 @@
 - Do not mix `asyncio` and `threading` without explicit justification.
 - Never use `asyncio.create_task()` without storing the task reference — it may be garbage collected silently.
 - For yielding control in long-running coroutines, use `await asyncio.sleep(0)`.
+- Do not change `async def` to `def` or vice versa without explicit user request.
