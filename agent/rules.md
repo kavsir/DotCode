@@ -206,6 +206,7 @@ When context matches, apply rules from the corresponding file:
 | Request contains 2+ verbs: fix/refactor/add/update/rename | `rules.d/patch_isolation.md` |
 | User types `@python` | `rules.d/python.md` (overrides generic coding rules) |
 | User types `@js` | `rules.d/javascript.md` (overrides generic coding rules) |
+| Multiple file extensions detected (e.g., .py and .js) and no language override | Ask: "Which language are you working on? @python or @js?" |
 | Current file extension `.py` and no language override | auto‑apply `rules.d/python.md` |
 | Current file extension `.js`/`.mjs`/`.cjs` and no language override | auto‑apply `rules.d/javascript.md` |
 | User types `@default` or `/default` | Reset to core rules only (unload language‑specific rules) |
