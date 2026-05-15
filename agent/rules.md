@@ -187,26 +187,24 @@ Files affected: <list in fix order>
 ---
 
 ## 10. Specialized Rules (Preloaded via --read)
-All files in `agent/rules.d/` are preloaded at startup via `--read` in `AI.bat` (absolute path). They are read-only and already in context. **No `/add` needed.**
 
-**Specialized rules override core rules when context matches.** Example: `dangerous_ops.md` changes flow to "Architect plan only" instead of auto-proceeding to Editor.
+ | Context | Apply rules from |
+ |---------|------------------|
++| Any shell command / script execution suggested | `rules.d/sandbox.md` |
+ | User types `@grill` | `rules.d/grill.md` |
+ | User types `@caveman` | `rules.d/caveman.md` |
+ | Debugging multi‑file error or user says `@diagnose` | `rules.d/diagnose.md` (overrides core section 9) |
+ | `async def` / `await` in code | `rules.d/async.md` |
+ | SQL / ORM / migration | `rules.d/database.md` |
+ | Auth / payment / secrets / encryption | `rules.d/security.md` |
+ | Change >300 lines or ≥3 files | `rules.d/heavy_feature.md` |
+ | Dangerous ops (production, destructive DB) | `rules.d/dangerous_ops.md` |
+ | Request contains 2+ verbs: fix/refactor/add/update/rename | `rules.d/patch_isolation.md` |
+ | User types `@python` | `rules.d/python.md` |
+ | User types `@js` | `rules.d/javascript.md` |
+ | Current file extension `.py` and no language override | auto‑apply `rules.d/python.md` |
+ | Current file extension `.js`/`.mjs`/`.cjs` and no language override | auto‑apply `rules.d/javascript.md` |
+ | User types `@default` or `/default` | Reset to core rules only |
 
-When context matches, apply rules from the corresponding file:
-
-| Context | Apply rules from |
-|---------|------------------|
-| User types `@grill` | `rules.d/grill.md` (triggered via section 0) |
-| User types `@caveman` | `rules.d/caveman.md` (triggered via section 0) |
-| Debugging multi‑file error or user says `@diagnose` | `rules.d/diagnose.md` (overrides core section 9) |
-| `async def` / `await` in code | `rules.d/async.md` |
-| SQL / ORM / migration | `rules.d/database.md` |
-| Auth / payment / secrets / encryption | `rules.d/security.md` |
-| Change >300 lines or ≥3 files | `rules.d/heavy_feature.md` |
-| Dangerous ops (production, destructive DB) | `rules.d/dangerous_ops.md` |
-| Request contains 2+ verbs: fix/refactor/add/update/rename | `rules.d/patch_isolation.md` |
-| User types `@python` | `rules.d/python.md` (overrides generic coding rules) |
-| User types `@js` | `rules.d/javascript.md` (overrides generic coding rules) |
-| Multiple file extensions detected (e.g., .py and .js) and no language override | Ask: "Which language are you working on? @python or @js?" |
-| Current file extension `.py` and no language override | auto‑apply `rules.d/python.md` |
-| Current file extension `.js`/`.mjs`/`.cjs` and no language override | auto‑apply `rules.d/javascript.md` |
-| User types `@default` or `/default` | Reset to core rules only (unload language‑specific rules) |
++Note: sandbox.md triggers on every shell command suggestion — it has no explicit keyword trigger.
++It runs in parallel with other rules, not instead of them.

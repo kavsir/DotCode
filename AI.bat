@@ -40,22 +40,36 @@ for /d /r . %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d" 2>nul
 :: =========================
 :: Launch Aider
 :: =========================
+:: TIER 1 — Always load (core only, <80 lines total)
+::   rules-core.md        : principles, triage, behavior, architect, safety
+::   system-map-core.md   : module map, active goal, constants
+::   sandbox.md           : shell command safety (always active)
+::
+:: TIER 2 — JIT load (agent uses /add on trigger, not preloaded)
+::   rules.d/python.md    : trigger = .py file detected
+::   rules.d/javascript.md: trigger = .js/.mjs file detected
+::   rules.d/async.md     : trigger = async def / await detected
+::   rules.d/database.md  : trigger = SQL / ORM detected
+::   rules.d/security.md  : trigger = auth / secrets detected
+::   rules.d/heavy_feature.md  : trigger = diff >300 lines or >=3 files
+::   rules.d/dangerous_ops.md  : trigger = production / destructive DB
+::   rules.d/patch_isolation.md: trigger = 2+ verbs fix/refactor/add/update/rename
+::   rules.d/grill.md     : trigger = @grill
+::   rules.d/caveman.md   : trigger = @caveman
+::   rules.d/diagnose.md  : trigger = @diagnose or multi-file error
+::
+:: TIER 3 — On demand (user or agent requests explicitly)
+::   lesson-log.md        : load on @diagnose or repeat error
+::   changelog.md         : load when history needed
+::   rules-extended.md    : load when sections 5-10 needed
+
 set PYTHONUTF8=1
 
 aider ^
   --config "%CONFIG_FILE%" ^
-  --read "%AGENT_DIR%\agent\rules.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\async.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\database.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\security.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\heavy_feature.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\dangerous_ops.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\patch_isolation.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\grill.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\caveman.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\diagnose.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\python.md" ^
-  --read "%AGENT_DIR%\agent\rules.d\javascript.md" ^
+  --read "%AGENT_DIR%\agent\rules-core.md" ^
+  --read "%AGENT_DIR%\agent\system-map-core.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\sandbox.md" ^
   --input-history-file "Aider\.aider.input.history-%CURRENT_FOLDER%" ^
   --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md"
 pause
