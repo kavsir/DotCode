@@ -54,6 +54,8 @@ aider ^
   --read "%AGENT_DIR%\agent\rules.d\grill.md" ^
   --read "%AGENT_DIR%\agent\rules.d\caveman.md" ^
   --read "%AGENT_DIR%\agent\rules.d\diagnose.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\python.md" ^
+  --read "%AGENT_DIR%\agent\rules.d\javascript.md" ^
   --input-history-file "Aider\.aider.input.history-%CURRENT_FOLDER%" ^
   --chat-history-file "Aider\.aider.chat.history-%CURRENT_FOLDER%.md"
 pause

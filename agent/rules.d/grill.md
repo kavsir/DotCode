@@ -19,7 +19,10 @@
 1. After each user answer, ask a follow‑up question that digs deeper into the most critical unknown.
 2. Do not propose a solution or write code until the user says one of:  
    `"no more questions"`, `"proceed"`, `"enough"`.
-3. When the user says to proceed, exit grill mode and handle the task normally.
+3. **After 10 questions without a proceed signal** → output:
+   `[GRILL] Many unknowns remain. Proceed with current info, or keep drilling? [proceed/continue]`
+   This prevents infinite loops when the user is unsure what they need.
+4. When the user says to proceed (or chooses `proceed` at step 3), exit grill mode and handle the task normally.
 
 ## Output format (at the end of grill)
 ```

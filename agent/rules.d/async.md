@@ -10,3 +10,7 @@
 - Never use `asyncio.create_task()` without storing the task reference — it may be garbage collected silently.
 - For yielding control in long-running coroutines, use `await asyncio.sleep(0)`.
 - Do not change `async def` to `def` or vice versa without explicit user request.
+- When using `asyncio.gather()`, always handle exceptions explicitly:
+  - Either use `return_exceptions=True` and check each result for `Exception` instances, or
+  - Wrap individual coroutines in `try/except` before passing to `gather`.
+  - Silent swallowing of exceptions from `gather` is a common source of hard-to-debug failures.

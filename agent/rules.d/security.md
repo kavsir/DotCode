@@ -7,6 +7,11 @@
 - Validate all external input (files, network, user) with explicit type/range checks. Always trim and validate length to avoid DoS.
 - No `chmod 777`. No writes to system dirs without confirmation.
 - For password hashing, use `bcrypt` or `argon2`. Never `MD5` or `SHA1`.
-- For auth/payment code, add comments: `# TRUST: <boundary>` and `# VALIDATE: <input>`.
+- For SQL: always use parameterized queries. See `database.md` for full rules.
+- For auth/payment code, add boundary comments:
+  ```python
+  # TRUST: input validated by API gateway upstream
+  # VALIDATE: user_id must be positive integer, checked below
+  ```
 - Explicitly list risks in Architect plan: "Risk: may lock out all users."
 - Require `[HIGH RISK] Proceed? Type 'yes' to continue.` before any auth/payment diff.

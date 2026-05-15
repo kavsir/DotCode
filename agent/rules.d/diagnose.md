@@ -1,6 +1,6 @@
 # Diagnose – Systematic Debugging
-*Apply when: user explicitly asks to diagnose a bug, OR an error spans multiple files.*  
-**Overrides** core section 7b (Cross‑file Bug Fix) when context matches.
+*Apply when: user explicitly asks to diagnose a bug (`@diagnose`), OR an error spans multiple files.*  
+**Overrides** core section 9 (Cross‑file Bug Fix) when context matches.
 
 ## The 6‑step loop
 Execute these steps strictly in order. Do not skip.
@@ -11,8 +11,9 @@ Execute these steps strictly in order. Do not skip.
 
 ### 2. Minimise
 - Find the smallest input / steps that still trigger the bug.
-- Remove unrelated factors (unused imports, irrelevant configs).
-- Ask user to help simplify if needed.
+- **Actively propose specific removals** — do not ask the user to figure out what is unrelated.
+  - Example: *"Does the database config affect this bug? If not, let's exclude it and re-run."*
+- Remove confirmed-unrelated factors (unused imports, irrelevant configs) after user confirms.
 
 ### 3. Hypothesise
 - Propose **1–2 hypotheses** for the root cause.
@@ -32,11 +33,16 @@ Execute these steps strictly in order. Do not skip.
 - Run existing tests in the same module to ensure nothing else broke.
 - Ask user to run broader test suite if available.
 
-## Escalation
-If any step fails or user cannot provide information:
-- **After 1 failure** → try a different approach (e.g., different reproduction command, different instrumentation).
-- **After 2 failures** → stop and ask for manual intervention:
-  `[DIAGNOSE] Stuck at step <N>. Please provide more details or fix manually.`
-
 ## Output format (after each step)
-`[DIAGNOSE] Step 1/6 done: reproduction command = <cmd>`
+`[DIAGNOSE] Step N/6 done: <summary>`
+
+## Escalation
+Two failure types are tracked separately:
+
+**Type A — User not responding:**
+→ Apply core rule `[BLOCKED]` (Section 8, rule 7): after 2 consecutive unanswered requests, prompt user.
+
+**Type B — Command still failing after fix attempt:**
+- **After 1 failure** → try a different approach (different reproduction command, different instrumentation).
+- **After 2 failures** → stop and escalate:
+  `[DIAGNOSE] Stuck at step <N>. Please provide more details or fix manually.`

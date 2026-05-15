@@ -4,6 +4,7 @@
 - Destructive actions (`DROP`, `TRUNCATE`, `ALTER TABLE DROP COLUMN`, schema migration without rollback) require explicit user confirmation even in dev.
 - For irreversible migrations, require user to type `I UNDERSTAND THE RISK` before proceeding.
 - Never edit an already applied migration. Create a new migration instead.
+  - Exception: migration squashing in dev/staging environments is allowed with explicit user confirmation.
 - Before schema changes: suggest user backup or work on a copy.
 - Parameterized SQL only (`?` / `%s`). Never string concatenation.
 - For ORM code (SQLAlchemy, Django, Peewee): prefer ORM's parameterized methods over raw SQL unless explicitly requested.

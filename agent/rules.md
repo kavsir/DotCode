@@ -43,21 +43,31 @@ Apply these principles before any code. They override all specific instructions 
 
 ## 1. Input Triage (Unified)
 Run in order. **If multiple triggers match, highest severity executes first.**
-Same severity → table order (H → I → E → G → D → A → B → C → F).
+Same severity within tier → table order.
 
-**Severity:** H = I = E = G > D > A > B > C > F
+**Severity tiers:**
+- **Critical-Safety** (CS): E, G — blocks execution, enforces guardrails
+- **Critical-UX** (CX): H, I, J, K — changes interaction mode for session
+- **High** (H): D
+- **Medium** (M): A, B
+- **Low** (L): C, F, L-reset
 
-| # | Sev | Trigger | Action |
-|---|-----|---------|--------|
-| H | Critical | Input starts with `@grill` or `/grill` | Load `rules.d/grill.md`. Drill with questions until user says "proceed" or "enough". |
-| I | Critical | Input starts with `@caveman` or `/caveman` | Load `rules.d/caveman.md`. Ultra‑token mode for session (until `@normal`). |
-| E | Critical | Delete/modify module marked `core`/`critical` in map | `[WARNING] Core module. Dependents: N. Proceed? [y/N]` |
-| G | Critical | `import X` not in `requirements.txt` or map | "Library X missing. 1. Add to requirements.txt + instruct pip install  2. Use stdlib only." If option 1: edit `requirements.txt` via diff, then instruct user to run `pip install -r requirements.txt` and confirm. |
+Order when multiple match: CS > CX > High > Medium > Low. Within same tier → table order.
+
+| # | Tier | Trigger | Action |
+|---|------|---------|--------|
+| E | CS | Delete/modify module marked `core`/`critical` in map | `[WARNING] Core module. Dependents: N. Proceed? [y/N]` |
+| G | CS | `import X` not in `requirements.txt` or map | "Library X missing. 1. Add to requirements.txt + instruct pip install  2. Use stdlib only." If option 1: edit `requirements.txt` via diff, then instruct user to run `pip install -r requirements.txt` and confirm. |
+| H | CX | Input starts with `@grill` or `/grill` | Load `rules.d/grill.md`. Drill with questions until user says "proceed" or "enough". |
+| I | CX | Input starts with `@caveman` or `/caveman` | Load `rules.d/caveman.md`. Ultra‑token mode for session (until `@normal`). |
+| J | CX | Input starts with `@python` or `/python` | Load `rules.d/python.md`. Set language context to Python for the session (or until `@default`). |
+| K | CX | Input starts with `@js` or `/javascript` | Load `rules.d/javascript.md`. Set language context to JavaScript/Node.js for the session (or until `@default`). |
 | D | High | "all/every/perfect/never fail" OR >10 files | "Exceeds capacity. Smaller steps: [2–3]. Start step 1?" → declines → ABORT. |
 | A | Medium | >200 words OR ≥2 distinct requests | "Multiple items. Execute sequentially. Confirm or reorder?" → split, verify each. |
 | B | Medium | "error/crash/fail" but no stack trace or file name | "Provide exact error output and file name." ONE sentence. If user provides only partial → ask for the missing part. |
 | C | Low | <5 words OR no action verb | "1. Fix error  2. Add feature  3. Refactor — choose." |
-| F | Low | >80% similarity to last 3 prompts | "Same request. Last result: [summary]. Run again? [y/N]" |
+| F | Low | >80% similarity to last 3 prompts *(same session only)* | "Same request. Last result: [summary]. Run again? [y/N]" |
+| L | Low | Input starts with `@default` or `/default` | Reset to core rules only. Unload any language‑specific rule files (python, js, etc.). |
 | Default | — | None matched | See default flow below. |
 
 **Default flow:**
@@ -110,13 +120,12 @@ Need files: [1] a.py [2] b.py. Add all? [y] yes [n] cancel [e] pick manually
   4. Directly imported neighbors
   5. Last 3 relevant turns
   6. Inferred assumptions → mark `[assume]`
-- **Conflict (Tier 1 overrides Tier 2 only for core violations):**
+- **Conflict resolution — default rule: Tier 2 (user instruction) wins unless one of the following applies:**
   - Delete/modify a `core`/`critical` module
   - Bypass a security rule (hardcode credentials)
   - Change a public API without updating dependent files (if dependency info available in map)
-  - Otherwise Tier 2 (user instruction) wins.
   → `[CONFLICT] User wants X, map says Y. Proceed? [y/N]`
-- No whole-repo scans. Do not regenerate unchanged code.
+  - All other conflicts → follow user instruction silently.
 
 ---
 
@@ -158,7 +167,9 @@ After each change (unless user says "skip checks"):
 
 ---
 
-## 8b. Cross-file Bug Fix (always active)
+## 9. Cross-file Bug Fix (always active)
+*Overridden by `diagnose.md` when context matches (multi-file error or `@diagnose` trigger).*
+
 - **Step 1 (Read):** Analyze all files in error trace. Find root cause.
 - **Step 1b (Reproduce):** Suggest a command to reproduce the error. Ask user to run and confirm. If cannot reproduce or no response → ask: "Please provide the exact error message or steps to trigger the bug."
 - **Step 2 (Scope):**
@@ -175,7 +186,7 @@ Files affected: <list in fix order>
 
 ---
 
-## 9. Specialized Rules (Preloaded via --read)
+## 10. Specialized Rules (Preloaded via --read)
 All files in `agent/rules.d/` are preloaded at startup via `--read` in `AI.bat` (absolute path). They are read-only and already in context. **No `/add` needed.**
 
 **Specialized rules override core rules when context matches.** Example: `dangerous_ops.md` changes flow to "Architect plan only" instead of auto-proceeding to Editor.
@@ -186,10 +197,15 @@ When context matches, apply rules from the corresponding file:
 |---------|------------------|
 | User types `@grill` | `rules.d/grill.md` (triggered via section 0) |
 | User types `@caveman` | `rules.d/caveman.md` (triggered via section 0) |
-| Debugging multi‑file error or user says `@diagnose` | `rules.d/diagnose.md` (overrides core section 8b) |
+| Debugging multi‑file error or user says `@diagnose` | `rules.d/diagnose.md` (overrides core section 9) |
 | `async def` / `await` in code | `rules.d/async.md` |
 | SQL / ORM / migration | `rules.d/database.md` |
 | Auth / payment / secrets / encryption | `rules.d/security.md` |
 | Change >300 lines or ≥3 files | `rules.d/heavy_feature.md` |
 | Dangerous ops (production, destructive DB) | `rules.d/dangerous_ops.md` |
 | Request contains 2+ verbs: fix/refactor/add/update/rename | `rules.d/patch_isolation.md` |
+| User types `@python` | `rules.d/python.md` (overrides generic coding rules) |
+| User types `@js` | `rules.d/javascript.md` (overrides generic coding rules) |
+| Current file extension `.py` and no language override | auto‑apply `rules.d/python.md` |
+| Current file extension `.js`/`.mjs`/`.cjs` and no language override | auto‑apply `rules.d/javascript.md` |
+| User types `@default` or `/default` | Reset to core rules only (unload language‑specific rules) |

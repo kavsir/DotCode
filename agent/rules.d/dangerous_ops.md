@@ -6,7 +6,9 @@
 - If user does not type exactly `yes` → ABORT. No exceptions.
 - Suggest creating a rollback plan before proceeding.
 - If staging environment not available, ask: "No staging found. Continue in production? Type 'yes' at your own risk."
-- After user types `yes`, output the complete set of diffs (all files). Then ask: "Review the changes above. Apply? [y/N]"
+- After user types `yes` → output the complete set of diffs (all files). Then ask:
+  `Review the changes above. Type 'apply' to execute.`
+  *(Using a distinct word avoids accidental confirmation from a prior 'yes'.)*
 - Only apply after this second confirmation.
 - Add `# REVERT: <reason>` to every changed line in critical files.
 - Never auto-commit dangerous changes. Always leave for user to review and commit manually.
