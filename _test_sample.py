@@ -3,6 +3,7 @@ with open("_test_sample.py", "w", encoding="utf-8") as f:
     f.write("""def helper():
     return 42
 
+# main() calls helper() and print()
 def main():
     result = helper()
     print(result)
