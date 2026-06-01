@@ -202,3 +202,56 @@ class CodeGraph:
                 "UPDATE symbols SET pagerank = ? WHERE id = ?", (rank, sym_id)
             )
         self.db.conn.commit()
+
+    def update_file(self, file_path: str):
+        """Cập nhật index cho một file cụ thể (sau khi file thay đổi)."""
+        if not self.db:
+            self._ensure_db()
+        
+        # Index lại file
+        self.indexer.index_file(file_path)
+        
+        # Tính lại PageRank
+        self._compute_pagerank()
+        
+        # Cập nhật GraphRAG embeddings nếu có
+        if self.graphrag:
+            rel_path = os.path.relpath(file_path, self.root)
+            symbols = self.db.get_symbols_in_file(rel_path)
+            if symbols:
+                # Xóa embeddings cũ
+                for sym in symbols:
+                    try:
+                        self.graphrag.collection.delete(ids=[sym['id']])
+                    except Exception:
+                        pass
+                
+                # Tạo embeddings mới
+                texts = []
+                metadatas = []
+                ids = []
+                for sym in symbols:
+                    text = self.graphrag._get_symbol_text(sym)
+                    texts.append(text)
+                    metadatas.append({
+                        "symbol_id": sym['id'],
+                        "name": sym['name'],
+                        "kind": sym['kind'],
+                        "file_path": rel_path,
+                        "start_line": sym['start_line'],
+                        "pagerank": sym.get('pagerank', 0.0),
+                    })
+                    ids.append(sym['id'])
+                
+                if texts:
+                    embeddings = self.graphrag.model.encode(texts).tolist()
+                    self.graphrag.collection.add(
+                        embeddings=embeddings,
+                        documents=texts,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+            
+            # Cập nhật communities
+            self.graphrag.detect_communities()
+            self.graphrag.summarize_communities()

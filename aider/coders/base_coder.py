@@ -2672,6 +2672,16 @@ class Coder:
             res = self.repo.commit(fnames=edited, context=context, aider_edits=True, coder=self)
             if res:
                 self.show_auto_commit_outcome(res)
+                
+                # ===== DotCode: Cập nhật Code Graph sau khi commit =====
+                if hasattr(self, 'code_graph') and self.code_graph:
+                    for fname in edited:
+                        try:
+                            self.code_graph.update_file(fname)
+                        except Exception as e:
+                            self.io.tool_warning(f"CodeGraph update failed for {fname}: {e}")
+                # ===== Kết thúc DotCode =====
+                
                 commit_hash, commit_message = res
                 return self.gpt_prompts.files_content_gpt_edits.format(
                     hash=commit_hash,
@@ -2682,7 +2692,7 @@ class Coder:
         except ANY_GIT_ERROR as err:
             self.io.tool_error(f"Unable to commit: {str(err)}")
             return
-
+        
     def show_auto_commit_outcome(self, res):
         commit_hash, commit_message = res
         self.last_aider_commit_hash = commit_hash
