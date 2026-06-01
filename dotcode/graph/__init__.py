@@ -164,9 +164,13 @@ class CodeGraph:
         return [dict(row) for row in cur.fetchall()]
     
     def _ensure_graphrag(self):
-        """Khởi tạo GraphRAG engine khi cần."""
         if self.graphrag is None and self.db is not None:
-            self.graphrag = GraphRAGEngine(self.db, self.root)
+            try:
+                from ..graphrag import GraphRAGEngine
+                self.graphrag = GraphRAGEngine(self.db, self.root)
+            except Exception as e:
+                if self.io:
+                    self.io.tool_warning(f"GraphRAG init failed: {e}")
     
     def semantic_search(self, query: str, limit: int = 10) -> list:
         """Tìm kiếm ngữ nghĩa qua GraphRAG."""
