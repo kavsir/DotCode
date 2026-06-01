@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 class GraphDatabase:
     def __init__(self, db_path=":memory:"):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
         self.conn.row_factory = sqlite3.Row  # Để truy vấn trả về dict-like

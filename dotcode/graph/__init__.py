@@ -3,6 +3,7 @@ import subprocess
 from .database import GraphDatabase
 from .indexer import Indexer
 from . .sage import SAGEEngine
+from ..graphrag import GraphRAGEngine
 
 
 class CodeGraph:
@@ -21,7 +22,7 @@ class CodeGraph:
         self.db = None
         self.indexer = None
         self.sage = None
-
+        self.graphrag = None
     def _get_project_name(self) -> str:
         """Lấy tên dự án từ git remote hoặc tên thư mục gốc."""
         try:
@@ -38,9 +39,18 @@ class CodeGraph:
                     return name
         except Exception:
             pass
-        # Fallback: tên thư mục gốc
-        name = os.path.basename(self.root.rstrip(os.sep))
-        return name if name else 'project'
+        
+        # Fallback: tên thư mục gốc (resolve đường dẫn tuyệt đối)
+        abs_root = os.path.abspath(self.root)
+        name = os.path.basename(abs_root.rstrip(os.sep))
+        # Nếu basename trả về rỗng hoặc '.', dùng tên ổ đĩa hoặc 'project'
+        if not name or name == '.':
+            # Thử lấy tên thư mục cha
+            parent = os.path.dirname(abs_root)
+            name = os.path.basename(parent) if parent else 'project'
+        if not name:
+            name = 'project'
+        return name
 
     def _ensure_db(self):
         """Tạo database và các thành phần liên quan nếu chưa có."""
@@ -52,27 +62,30 @@ class CodeGraph:
 
     # ===== Lifecycle =====
     def is_indexed(self) -> bool:
+        # Nếu db chưa được khởi tạo, thử mở database nếu file tồn tại
         if self.db is None:
-            return False
+            if os.path.exists(self.db_path):
+                self._ensure_db()
+            else:
+                return False
         try:
             return self.db.count_symbols() > 0
         except Exception:
             return False
 
     def index(self, files: list = None):
-        """Index toàn bộ repo hoặc danh sách file. Chỉ tạo database khi có ít nhất 1 file code."""
         if files is None:
             files = self._collect_code_files()
-
-        # Không có file code nào được hỗ trợ → không tạo database
         if not files:
             return
-
-        # Tạo database lười (lazy) trước khi index
         self._ensure_db()
-
         for f in files:
             self.indexer.index_file(f)
+        
+        self._compute_pagerank()
+        self._ensure_graphrag()
+        if self.graphrag:
+            self.graphrag.index_symbols()
 
     def _collect_code_files(self):
         """Thu thập tất cả file code dựa trên detect_language (đa ngôn ngữ)."""
@@ -135,3 +148,57 @@ class CodeGraph:
                 context += "\n\n" + sage_context
 
         return context[:max_tokens * 4]
+    
+    def search(self, query: str, limit: int = 10) -> list:
+        """Tìm kiếm symbols theo tên (fuzzy)."""
+        if not self.is_indexed():
+            return []
+        
+        cur = self.db.conn.execute(
+            """SELECT * FROM symbols 
+            WHERE name LIKE ? OR signature LIKE ?
+            ORDER BY pagerank DESC
+            LIMIT ?""",
+            (f"%{query}%", f"%{query}%", limit)
+        )
+        return [dict(row) for row in cur.fetchall()]
+    
+    def _ensure_graphrag(self):
+        """Khởi tạo GraphRAG engine khi cần."""
+        if self.graphrag is None and self.db is not None:
+            self.graphrag = GraphRAGEngine(self.db, self.root)
+    
+    def semantic_search(self, query: str, limit: int = 10) -> list:
+        """Tìm kiếm ngữ nghĩa qua GraphRAG."""
+        self._ensure_graphrag()
+        if not self.graphrag:
+            return []
+        return self.graphrag.semantic_search(query, limit)
+    
+    def _compute_pagerank(self):
+        """Tính PageRank cho tất cả symbols dựa trên edges."""
+        import networkx as nx
+        
+        rows = self.db.conn.execute(
+            "SELECT source_id, target_id, weight FROM edges WHERE type IN ('calls', 'references')"
+        ).fetchall()
+        
+        if not rows:
+            return
+        
+        G = nx.DiGraph()
+        for src, tgt, w in rows:
+            G.add_edge(src, tgt, weight=w)
+        
+        all_symbols = self.db.conn.execute("SELECT id FROM symbols").fetchall()
+        for (sym_id,) in all_symbols:
+            if sym_id not in G:
+                G.add_node(sym_id)
+        
+        pagerank = nx.pagerank(G, alpha=0.85, weight='weight')
+        
+        for sym_id, rank in pagerank.items():
+            self.db.conn.execute(
+                "UPDATE symbols SET pagerank = ? WHERE id = ?", (rank, sym_id)
+            )
+        self.db.conn.commit()

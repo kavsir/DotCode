@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import base64
+from email.mime import message
 import hashlib
 import json
 import locale
@@ -15,6 +16,12 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime
+from dotcode.code_rag import CodeRAG
+import re
+import os
+from dotcode.graph import CodeGraph
+from dotcode.hitl import HITLManager, RiskLevel
+from dotcode.agents.intent_agent import IntentAgent
 
 # Optional dependency: used to convert locale codes (eg ``en_US``)
 # into human-readable language names (eg ``English``).
@@ -338,6 +345,8 @@ class Coder:
         file_watcher=None,
         auto_copy_context=False,
         auto_accept_architect=True,
+        code_graph = None,
+        code_rag = None
     ):
         # Fill in a dummy Analytics if needed, but it is never .enable()'d
         self.analytics = analytics if analytics is not None else Analytics()
@@ -493,6 +502,27 @@ class Coder:
         max_inp_tokens = self.main_model.info.get("max_input_tokens") or 0
 
         has_map_prompt = hasattr(self, "gpt_prompts") and self.gpt_prompts.repo_content_prefix
+        # DotCode: Khởi tạo Intent Agent
+        self.intent_agent = IntentAgent()
+        self.code_graph = None
+        self.code_rag = code_rag  # DotCode: LangChain CodeRAG (lazy init)
+        # DotCode: Khởi tạo HITL Manager
+        self.hitl_manager = HITLManager()
+        
+        # DotCode: Khởi tạo Code Graph Engine
+                # DotCode: Khởi tạo Code Graph Engine
+        self.code_graph = None
+        if self.repo:
+            try:
+                self.code_graph = CodeGraph(root=self.root)
+                self.io.tool_output(f"📁 Code Graph database: {self.code_graph.db_path}")
+                # Tự động index nếu chưa có dữ liệu
+                if not self.code_graph.is_indexed():
+                    self.code_graph.index()
+                    # if self.code_graph.is_indexed():
+                    #     self.io.tool_output(f"✅ Code Graph indexed {self.code_graph.db.count_symbols()} symbols")
+            except Exception as e:
+                self.io.tool_warning(f"CodeGraph init failed: {e}")
 
         if use_repo_map and self.repo and has_map_prompt:
             self.repo_map = RepoMap(
@@ -541,6 +571,7 @@ class Coder:
                 self.io.tool_output("JSON Schema:")
                 self.io.tool_output(json.dumps(self.functions, indent=4))
 
+        self._fallback_warned = False
     def setup_lint_cmds(self, lint_cmds):
         if not lint_cmds:
             return
@@ -707,13 +738,24 @@ class Coder:
         return matches
 
     def get_repo_map(self, force_refresh=False):
-        if not self.repo_map:
-            return
+
+        if self.code_graph and self.code_graph.is_indexed():
+            self.io.tool_output("✅ DotCode: Using Code Graph Engine for context")
+            return self.code_graph.get_context(
+                chat_files=self.abs_fnames,
+                other_files=self.abs_read_only_fnames,
+                format="text",
+                max_tokens=self.repo_map.max_map_tokens if self.repo_map else 1024
+            )
+
+        # Fallback về RepoMap cũ
+        if not self._fallback_warned:
+            self.io.tool_output("⚠️ DotCode: Falling back to RepoMap")
+            self._fallback_warned = True
 
         cur_msg_text = self.get_cur_message_text()
         mentioned_fnames = self.get_file_mentions(cur_msg_text)
         mentioned_idents = self.get_ident_mentions(cur_msg_text)
-
         mentioned_fnames.update(self.get_ident_filename_matches(mentioned_idents))
 
         all_abs_files = set(self.get_all_abs_files())
@@ -722,28 +764,21 @@ class Coder:
         other_files = all_abs_files - chat_files
 
         repo_content = self.repo_map.get_repo_map(
-            chat_files,
-            other_files,
+            chat_files, other_files,
             mentioned_fnames=mentioned_fnames,
             mentioned_idents=mentioned_idents,
             force_refresh=force_refresh,
         )
 
-        # fall back to global repo map if files in chat are disjoint from rest of repo
         if not repo_content:
             repo_content = self.repo_map.get_repo_map(
-                set(),
-                all_abs_files,
+                set(), all_abs_files,
                 mentioned_fnames=mentioned_fnames,
                 mentioned_idents=mentioned_idents,
             )
 
-        # fall back to completely unhinted repo
         if not repo_content:
-            repo_content = self.repo_map.get_repo_map(
-                set(),
-                all_abs_files,
-            )
+            repo_content = self.repo_map.get_repo_map(set(), all_abs_files)
 
         return repo_content
 
@@ -929,6 +964,33 @@ class Coder:
         else:
             message = user_message
 
+        # DotCode: Sử dụng Intent Agent để phân loại
+        intent, confidence = self.intent_agent.classify(message)
+
+        if intent == "ambiguous":
+            self.io.tool_output("🤔 Your request is ambiguous. Could you please clarify what you want me to do?")
+            self.io.tool_output("   For example:")
+            self.io.tool_output("   - 'Explain what greet does'")
+            self.io.tool_output("   - 'Add a docstring to greet'")
+            self.io.tool_output("   - 'Show me the definition of greet'")
+            return
+        
+        if intent == "command":
+            self._handle_command(message)
+            return
+        
+        if intent == "question":
+            self._auto_add_context(message, max_files=3)
+            self._handle_question(message)
+            return
+
+        if intent == "search":
+            self._auto_add_context(message, max_files=5)
+            self._handle_search(message)
+            return
+
+        # intent == "command": tự động thêm file liên quan rồi vào luồng Aider
+        self._auto_add_context(message, max_files=3)
         while message:
             self.reflected_message = None
             list(self.send_message(message))
@@ -942,6 +1004,195 @@ class Coder:
 
             self.num_reflections += 1
             message = self.reflected_message
+
+    def _auto_add_context(self, message: str, max_files: int = 5) -> set:
+        """Tự động thêm file liên quan vào chat dựa trên câu hỏi."""
+        added_files = set()
+        
+        #self.io.tool_output(f"🔍 [DEBUG] _auto_add_context START")
+        #self.io.tool_output(f"🔍 [DEBUG] code_graph exists: {self.code_graph is not None}")
+        
+        if not self.code_graph:
+            #self.io.tool_output(f"🔍 [DEBUG] No code_graph, returning")
+            return added_files
+        
+        #self.io.tool_output(f"🔍 [DEBUG] is_indexed: {self.code_graph.is_indexed()}")
+        if not self.code_graph.is_indexed():
+            #self.io.tool_output(f"🔍 [DEBUG] Not indexed, returning")
+            return added_files
+        
+        file_count = len(self.abs_fnames) + len(self.abs_read_only_fnames)
+        #self.io.tool_output(f"🔍 [DEBUG] Files in chat: {file_count}")
+        if file_count >= 10:
+            #self.io.tool_output(f"🔍 [DEBUG] Too many files, returning")
+            return added_files
+        
+        # Trích xuất các token tiềm năng
+        import re
+        # Regex mới: hỗ trợ Unicode letters và numbers
+        tokens = re.findall(r'[\w]+', message, re.UNICODE)
+        # Lọc bỏ các token quá ngắn hoặc toàn số
+        tokens = [t for t in tokens if len(t) >= 3 and not t.isdigit()]
+        #self.io.tool_output(f"🔍 [DEBUG] Tokens extracted: {tokens[:10]}")
+        
+        all_symbols = []
+        seen_ids = set()
+        
+        for token in tokens[:5]:
+            symbols = self.code_graph.search(token, limit=10)
+            #self.io.tool_output(f"🔍 [DEBUG] Token '{token}' -> {len(symbols)} results")
+            for sym in symbols:
+                if sym['id'] not in seen_ids:
+                    seen_ids.add(sym['id'])
+                    all_symbols.append(sym)
+                    #self.io.tool_output(f"🔍 [DEBUG]   - {sym['name']} in {sym['file_path']}")
+        if self.code_graph and hasattr(self.code_graph, 'semantic_search'):
+            semantic_results = self.code_graph.semantic_search(message, limit=10)
+            for r in semantic_results:
+                detail = r.get('detail')
+                if detail and detail['id'] not in seen_ids:
+                    seen_ids.add(detail['id'])
+                    all_symbols.append(detail)
+        #self.io.tool_output(f"🔍 [DEBUG] Total unique symbols: {len(all_symbols)}")
+        
+        if not all_symbols:
+            #self.io.tool_output(f"🔍 [DEBUG] No symbols found, returning")
+            return added_files
+        
+        seen_files = set()
+        ranked_files = []
+        for sym in all_symbols:
+            file_path = sym.get('file_path', '')
+            if file_path and file_path not in seen_files:
+                seen_files.add(file_path)
+                abs_path = self.abs_root_path(file_path)
+                exists = os.path.exists(abs_path)
+                #self.io.tool_output(f"🔍 [DEBUG] File: {file_path} -> {abs_path} (exists: {exists})")
+                if exists:
+                    ranked_files.append((abs_path, sym.get('pagerank', 0.0)))
+        
+        #self.io.tool_output(f"🔍 [DEBUG] Ranked files: {len(ranked_files)}")
+        ranked_files.sort(key=lambda x: x[1], reverse=True)
+        
+        for abs_path, rank in ranked_files[:max_files]:
+            in_fnames = abs_path in self.abs_fnames
+            in_readonly = abs_path in self.abs_read_only_fnames
+            #self.io.tool_output(f"🔍 [DEBUG] Checking: {abs_path} (in_fnames={in_fnames}, in_readonly={in_readonly})")
+            if not in_fnames and not in_readonly:
+                self.abs_read_only_fnames.add(abs_path)
+                added_files.add(abs_path)
+                rel_path = os.path.relpath(abs_path, self.root)
+                self.io.tool_output(f"📎 Auto-added to context: {rel_path} (relevance: {rank:.2f})")
+        
+        #self.io.tool_output(f"🔍 [DEBUG] Total added: {len(added_files)}")
+        #self.io.tool_output(f"🔍 [DEBUG] _auto_add_context END")
+        return added_files
+    
+
+    def _handle_question(self, message):
+        if self.code_graph and not self.code_rag:
+            if hasattr(self.code_graph, 'graphrag') and self.code_graph.graphrag:
+                try:
+                    self.code_rag = CodeRAG(self.code_graph, self.code_graph.graphrag)
+                except Exception as e:
+                    self.io.tool_warning(f"CodeRAG init failed: {e}")
+
+        # Nếu có CodeRAG, dùng nó
+        if self.code_rag:
+            self.io.tool_output("🧠 Thinking with CodeRAG...")
+            answer = self.code_rag.query(message)
+            self.io.tool_output("📝 Answer: " + answer)
+            return
+
+        # Fallback về cơ chế cũ
+        if not self.abs_fnames and not self.abs_read_only_fnames:
+            self.io.tool_output("💡 Tip: Use /add <file> to add files to the chat...")
+        """Xử lý câu hỏi: dùng prompt riêng, không SEARCH/REPLACE."""
+        if not self.abs_fnames and not self.abs_read_only_fnames:
+            self.io.tool_output("💡 Tip: Use /add <file> to add files to the chat so I can answer questions about your code.")
+        
+        saved_prompt = self.gpt_prompts.main_system
+        
+        self.gpt_prompts.main_system = """You are an expert software developer assistant. 
+    The user is asking a question about their codebase. 
+    Answer the question concisely and accurately in the same language as the user's question.
+    Do NOT suggest any code changes, do NOT use SEARCH/REPLACE blocks, do NOT edit any files. 
+    Just provide a helpful, natural language answer."""
+        
+        try:
+            self.dry_run = True
+            self.reflected_message = None
+            list(self.send_message(message))
+            
+            if self.partial_response_content:
+                self.io.tool_output("📝 Answer: " + self.partial_response_content)
+        finally:
+            self.gpt_prompts.main_system = saved_prompt
+            self.dry_run = False
+
+    def _handle_search(self, message):
+        """Xử lý tìm kiếm: dùng Code Graph Engine với token extraction, semantic search và lọc theo file."""
+        if not hasattr(self, 'code_graph') or not self.code_graph:
+            self.io.tool_output("🔍 Code Graph Engine is not available for this project.")
+            return
+
+        import re
+        all_symbols = []
+        seen_ids = set()
+
+        # 1. Token search (chính xác)
+        tokens = re.findall(r'[\w]+', message, re.UNICODE)
+        tokens = [t for t in tokens if len(t) >= 3 and not t.isdigit()]
+        for token in tokens[:5]:
+            symbols = self.code_graph.search(token, limit=10)
+            for sym in symbols:
+                if sym['id'] not in seen_ids:
+                    seen_ids.add(sym['id'])
+                    all_symbols.append(sym)
+
+        # 2. Semantic search (bổ sung)
+        if hasattr(self.code_graph, 'semantic_search'):
+            try:
+                semantic_results = self.code_graph.semantic_search(message, limit=10)
+                for r in semantic_results:
+                    detail = r.get('detail')
+                    if detail and detail['id'] not in seen_ids:
+                        seen_ids.add(detail['id'])
+                        all_symbols.append(detail)
+            except Exception:
+                pass
+
+        # 3. Nếu có tên file cụ thể trong câu hỏi, lấy toàn bộ symbols của file đó
+        file_mentions = self.get_file_mentions(message)
+        for rel_fname in file_mentions:
+            abs_fname = self.abs_root_path(rel_fname)
+            if os.path.exists(abs_fname):
+                file_symbols = self.code_graph.db.get_symbols_in_file(rel_fname)
+                for sym in file_symbols:
+                    if sym['id'] not in seen_ids:
+                        seen_ids.add(sym['id'])
+                        all_symbols.append(sym)
+
+        # 4. Lọc theo kind nếu có
+        kind_filter = None
+        if re.search(r'\bclass(es)?\b', message, re.IGNORECASE):
+            kind_filter = 'class'
+        elif re.search(r'\b(function|method|hàm|phương thức)\b', message, re.IGNORECASE):
+            kind_filter = 'function'  # bao gồm cả method
+
+        if kind_filter and all_symbols:
+            all_symbols = [s for s in all_symbols if s.get('kind') == kind_filter or (kind_filter == 'function' and s.get('kind') in ('function', 'method'))]
+
+        # 5. Hiển thị kết quả
+        if all_symbols:
+            self.io.tool_output(f"🔍 Found {len(all_symbols)} results:")
+            for sym in all_symbols[:10]:
+                kind = sym.get('kind', '?')
+                name = sym.get('name', '?')
+                file_path = sym.get('file_path', '?')
+                self.io.tool_output(f"  - {kind} {name} in {file_path}")
+        else:
+            self.io.tool_output("🔍 No results found.")
 
     def check_and_open_urls(self, exc, friendly_msg=None):
         """Check exception for URLs, offer to open in a browser, with user-friendly error msgs."""
@@ -2299,19 +2550,59 @@ class Coder:
             edits = self.get_edits()
             edits = self.apply_edits_dry_run(edits)
             edits = self.prepare_to_edit(edits)
+
+            # ===== DotCode: HITL + SAGE Integration =====
+            filtered_edits = []
+            for edit in edits:
+                fname, search, replace = edit
+                risk = self.hitl_manager.classify_change(search, replace)
+
+                apply_change = False
+                if risk == RiskLevel.LOW:
+                    self.io.tool_output(f"🔧 Auto-applying safe change in {fname}")
+                    apply_change = True
+                elif risk == RiskLevel.MEDIUM:
+                    self.io.tool_output(f"⚠️ Review change in {fname}:")
+                    apply_change = self.io.confirm_ask("Apply this change?")
+                else:  # HIGH
+                    self.io.tool_output(f"🚨 Important change in {fname} - please review carefully:")
+                    apply_change = self.io.confirm_ask("Apply this change?")
+
+                if apply_change:
+                    filtered_edits.append(edit)
+                    # Ghi nhớ vào SAGE (nếu có)
+                    if hasattr(self, 'code_graph') and self.code_graph and hasattr(self.code_graph, 'sage'):
+                        sym_id = f"{fname}::{search.splitlines()[0][:30]}"
+                        self.code_graph.sage.remember(
+                            event_type="user_accept",
+                            description=f"Change in {fname}: {search[:50]}...",
+                            symbol_ids=[sym_id],
+                            metadata={"risk_level": risk.value}
+                        )
+                else:
+                    self.io.tool_output(f"Skipped change in {fname}")
+                    if hasattr(self, 'code_graph') and self.code_graph and hasattr(self.code_graph, 'sage'):
+                        sym_id = f"{fname}::{search.splitlines()[0][:30]}"
+                        self.code_graph.sage.remember(
+                            event_type="user_reject",
+                            description=f"Rejected change in {fname}: {search[:50]}...",
+                            symbol_ids=[sym_id],
+                            metadata={"risk_level": risk.value}
+                        )
+
+            edits = filtered_edits
             edited = set(edit[0] for edit in edits)
+            # ===== Kết thúc DotCode =====
 
             self.apply_edits(edits)
+
         except ValueError as err:
             self.num_malformed_responses += 1
-
             err = err.args[0]
-
             self.io.tool_error("The LLM did not conform to the edit format.")
             self.io.tool_output(urls.edit_errors)
             self.io.tool_output()
             self.io.tool_output(str(err))
-
             self.reflected_message = str(err)
             return edited
 
@@ -2321,9 +2612,7 @@ class Coder:
         except Exception as err:
             self.io.tool_error("Exception while updating files:")
             self.io.tool_error(str(err), strip=False)
-
             traceback.print_exc()
-
             self.reflected_message = str(err)
             return edited
 
@@ -2483,3 +2772,26 @@ class Coder:
             line_plural = "line" if num_lines == 1 else "lines"
             self.io.tool_output(f"Added {num_lines} {line_plural} of output to the chat.")
             return accumulated_output
+        
+    def _handle_command(self, message):
+        """Xử lý command: cải thiện prompt để LLM tuân thủ SEARCH/REPLACE."""
+        # Tự động thêm file liên quan
+        self._auto_add_context(message, max_files=3)
+        
+        # Thêm hướng dẫn cụ thể vào message
+        enhanced_message = message + "\n\n(Hướng dẫn: Hãy trả lời BẰNG MỘT SEARCH/REPLACE block duy nhất. Nếu cần tạo file mới, dùng SEARCH trống. Chỉ trả về code, không giải thích.)"
+        
+        # Gửi vào luồng Aider
+        while enhanced_message:
+            self.reflected_message = None
+            list(self.send_message(enhanced_message))
+            
+            if not self.reflected_message:
+                break
+            
+            if self.num_reflections >= self.max_reflections:
+                self.io.tool_warning(f"Only {self.max_reflections} reflections allowed, stopping.")
+                return
+            
+            self.num_reflections += 1
+            enhanced_message = self.reflected_message
