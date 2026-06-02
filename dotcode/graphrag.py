@@ -98,24 +98,93 @@ class GraphRAGEngine:
 
     # ==================== SUMMARIZATION ====================
     
-    def summarize_communities(self, use_llm: bool = False) -> None:
+    def summarize_communities(self, use_llm: bool = True) -> None:
+        """Tạo tóm tắt cho mỗi community. Nếu use_llm=True, dùng LLM để tạo mô tả có ý nghĩa."""
         for comm_id, comm_data in self.communities.items():
-            nodes = comm_data["nodes"][:10]
+            nodes = comm_data["nodes"][:15]  # Top 15 nodes để tránh quá dài
             
-            node_names = []
-            node_kinds = []
+            # Lấy thông tin chi tiết
+            node_info = []
             for node_id in nodes:
                 sym = self.db.get_symbol(node_id)
                 if sym:
-                    node_names.append(sym["name"])
-                    node_kinds.append(sym["kind"])
+                    node_info.append(f"- {sym['kind']} {sym['name']} in {sym['file_path']} (line {sym['start_line']})")
             
             if use_llm:
-                summary = self._llm_summarize(node_names, node_kinds)
+                summary = self._llm_summarize_community(node_info)
             else:
-                summary = self._rule_summarize(node_names, node_kinds)
+                summary = self._rule_summarize(node_info)
             
             self.communities[comm_id]["summary"] = summary
+
+    def _llm_summarize_community(self, node_info: list) -> str:
+        """Dùng LLM để tạo tóm tắt có ý nghĩa cho community."""
+        import os
+        import requests
+        
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            return self._rule_summarize_community_fallback(node_info)
+        
+        symbols_text = "\n".join(node_info[:10])
+        
+        prompt = f"""You are analyzing a codebase. Below is a list of related functions, classes, and methods that form a "community" (a group of tightly connected code).
+
+    Your task: Write a brief summary (2-3 sentences) describing:
+    1. What this community does (its main purpose)
+    2. How the key symbols work together
+    3. What role this community plays in the larger codebase
+
+    Symbols in this community:
+    {symbols_text}
+
+    Summary:"""
+        
+        try:
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 150,
+                    "temperature": 0.3
+                },
+                timeout=15
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"].strip()
+            else:
+                return self._rule_summarize_community_fallback(node_info)
+        except Exception:
+            return self._rule_summarize_community_fallback(node_info)
+
+    def _rule_summarize_community_fallback(self, node_info: list) -> str:
+        """Fallback: tạo tóm tắt rule-based nếu LLM không khả dụng."""
+        if not node_info:
+            return "Empty community"
+        
+        # Đếm loại
+        kinds = {}
+        for info in node_info[:10]:
+            # Trích xuất kind từ chuỗi "- method xxx in file.py"
+            parts = info.split()
+            if len(parts) >= 2:
+                kind = parts[1]
+                kinds[kind] = kinds.get(kind, 0) + 1
+        
+        kind_str = ", ".join([f"{v} {k}s" for k, v in kinds.items()])
+        names = []
+        for info in node_info[:5]:
+            parts = info.split()
+            if len(parts) >= 3:
+                names.append(parts[2].rstrip(','))
+        
+        return f"Community with {kind_str}. Key symbols: {', '.join(names)}"
 
     def _rule_summarize(self, names: List[str], kinds: List[str]) -> str:
         if not names:

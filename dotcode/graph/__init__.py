@@ -2,8 +2,11 @@ import os
 import subprocess
 from typing import List, Dict, Optional
 
+from dotcode.graph.multi_hop import MultiHopEngine
+from .multi_hop import MultiHopEngine
 from .interface import GraphDBInterface
 from .sqlite_adapter import SQLiteAdapter
+from .neo4j_adapter import Neo4jAdapter
 from .database import GraphDatabase
 from .indexer import Indexer
 from ..sage import SAGEEngine
@@ -15,37 +18,101 @@ class CodeGraph:
     def __init__(self, root: str = None, db: GraphDBInterface = None, io=None):
         self.root = root or os.getcwd()
         self.io = io
+        self.multi_hop = None
 
-        # Nếu không truyền db, tự tạo SQLiteAdapter (giữ tương thích ngược)
         if db is not None:
+            # Backend được truyền từ ngoài (giữ nguyên)
             self.db = db
-            # Khi db được truyền từ ngoài, cần tự thiết lập các thành phần khác
             self.db_dir = os.path.join(self.root, '.dotcode')
             self.project_name = self._get_project_name()
-            self.db_path = getattr(db, '_db', None)
-            if hasattr(self.db, '_db'):
-                self.db_path = self.db._db.db_path
+            if hasattr(db, '_db') and hasattr(db._db, 'db_path'):
+                self.db_path = db._db.db_path
             else:
                 self.db_path = os.path.join(self.db_dir, f"{self.project_name}.db")
-            self.indexer = Indexer(self.db, self.root) if hasattr(self.db, '_db') else None
+            self.indexer = Indexer(self.db._db, self.root) if hasattr(self.db, '_db') else None
             self.sage = SAGEEngine(self.db._db) if hasattr(self.db, '_db') else None
             self.graphrag = None
         else:
-            # Tự tạo database và adapter
-            self.db_dir = os.path.join(self.root, '.dotcode')
-            self.project_name = self._get_project_name()
-            self.db_path = os.path.join(self.db_dir, f"{self.project_name}.db")
-            self.db = None  # Sẽ được khởi tạo lười
-            self.indexer = None
-            self.sage = None
-            self.graphrag = None
+            # Tự động chọn backend
+            self._init_backend()
+
+    def _init_backend(self):
+        """Tự động chọn backend dựa trên biến môi trường và quy mô dự án."""
+        backend = os.getenv("DOTCODE_BACKEND", "auto")
+        self.db_dir = os.path.join(self.root, '.dotcode')
+        self.project_name = self._get_project_name()
+        self.db_path = os.path.join(self.db_dir, f"{self.project_name}.db")
+
+        if backend == "neo4j":
+            self._init_neo4j()
+        elif backend == "sqlite":
+            self._init_sqlite()
+        else:  # auto
+            # Nếu đã có database SQLite, kiểm tra quy mô
+            if os.path.exists(self.db_path):
+                raw_db = GraphDatabase(self.db_path)
+                try:
+                    count = raw_db.count_symbols()
+                except Exception:
+                    count = 0
+                if count > 5000:
+                    # Dự án lớn, chuyển sang Neo4j nếu có cấu hình
+                    if os.getenv("NEO4J_URI"):
+                        self._init_neo4j()
+                    else:
+                        self._init_sqlite()
+                        if self.io:
+                            self.io.tool_warning(
+                                "Dự án có hơn 5000 symbols, cân nhắc dùng Neo4j để tăng hiệu năng. "
+                                "Đặt biến môi trường NEO4J_URI để kích hoạt."
+                            )
+                else:
+                    self._init_sqlite()
+            else:
+                self._init_sqlite()
+
+    def _init_sqlite(self):
+        """Khởi tạo backend SQLite."""
+        self.db_path = os.path.join(self.db_dir, f"{self.project_name}.db")
+        os.makedirs(self.db_dir, exist_ok=True)
+        raw_db = GraphDatabase(self.db_path)
+        self.db = SQLiteAdapter(raw_db)
+        self.indexer = Indexer(raw_db, self.root)
+        self.sage = SAGEEngine(raw_db)
+        self.graphrag = None
+        if self.io:
+            self.io.tool_output(f"📁 Code Graph database: {self.db_path}")
+
+    def _init_neo4j(self):
+        """Khởi tạo backend Neo4j."""
+        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        user = os.getenv("NEO4J_USERNAME", "neo4j")
+        password = os.getenv("NEO4J_PASSWORD", "password")
+        self.db = Neo4jAdapter(uri=uri, user=user, password=password)
+        self.indexer = None
+        self.sage = None
+        self.graphrag = None
+        self.db_path = uri
+        if self.io:
+            self.io.tool_output(f"📁 Code Graph database: {uri} (Neo4j)")
+
+    @classmethod
+    def create_auto(cls, root: str, io=None) -> 'CodeGraph':
+        """Factory method tự động chọn backend."""
+        return cls(root=root, io=io)
 
     @classmethod
     def create_with_sqlite(cls, root: str, io=None) -> 'CodeGraph':
         """Factory method tạo CodeGraph với SQLite backend."""
+        os.environ["DOTCODE_BACKEND"] = "sqlite"
         instance = cls(root=root, io=io)
-        instance._ensure_db()  # Khởi tạo database và adapter
         return instance
+
+    @classmethod
+    def create_with_neo4j(cls, root: str, io=None) -> 'CodeGraph':
+        """Factory method tạo CodeGraph với Neo4j backend."""
+        os.environ["DOTCODE_BACKEND"] = "neo4j"
+        return cls(root=root, io=io)
 
     def _get_project_name(self) -> str:
         """Lấy tên dự án từ git remote hoặc tên thư mục gốc."""
@@ -74,13 +141,9 @@ class CodeGraph:
         return name
 
     def _ensure_db(self):
-        """Tạo database và SQLiteAdapter nếu chưa có."""
+        """Tạo database và các thành phần liên quan nếu chưa có."""
         if self.db is None:
-            os.makedirs(self.db_dir, exist_ok=True)
-            raw_db = GraphDatabase(self.db_path)
-            self.db = SQLiteAdapter(raw_db)
-            self.indexer = Indexer(raw_db, self.root)  # Indexer vẫn cần GraphDatabase gốc
-            self.sage = SAGEEngine(raw_db)
+            self._init_backend()
 
     def is_indexed(self) -> bool:
         if self.db is None:
@@ -99,12 +162,14 @@ class CodeGraph:
         if not files:
             return
         self._ensure_db()
-        for f in files:
-            self.indexer.index_file(f)
-        self._compute_pagerank()
-        self._ensure_graphrag()
-        if self.graphrag:
-            self.graphrag.index_symbols()
+        # Chỉ index nếu dùng SQLite (Neo4j cần migration riêng)
+        if hasattr(self.db, '_db') and self.indexer:
+            for f in files:
+                self.indexer.index_file(f)
+            self._compute_pagerank()
+            self._ensure_graphrag()
+            if self.graphrag:
+                self.graphrag.index_symbols()
 
     def _collect_code_files(self):
         code_files = []
@@ -131,14 +196,13 @@ class CodeGraph:
                 continue
 
             rel_path = os.path.relpath(fname, self.root)
-            symbols = self.db.get_symbols_in_file(rel_path)  # Giờ trả về List[Symbol]
+            symbols = self.db.get_symbols_in_file(rel_path)
 
             if not symbols:
                 continue
 
             lines.append(f"File: {rel_path}")
             for sym in symbols[:15]:
-                # sym là Symbol object, truy cập thuộc tính thay vì dict key
                 callees = self.db.get_callees(sym.id)
                 callee_str = ""
                 if callees:
@@ -151,7 +215,7 @@ class CodeGraph:
                     caller_names = [c.name for c in callers[:3]]
                     caller_str = f" ← called by: {', '.join(caller_names)}"
 
-                line = f"  {sym.kind.value} {sym.name}() (line {sym.start_line}){callee_str}{caller_str}"
+                line = f"  {sym.kind.value if hasattr(sym.kind, 'value') else sym.kind} {sym.name}() (line {sym.start_line}){callee_str}{caller_str}"
                 lines.append(line)
                 all_symbol_ids.append(sym.id)
 
@@ -165,36 +229,37 @@ class CodeGraph:
         return context[:max_tokens * 4]
 
     def search(self, query: str, limit: int = 10) -> List[Symbol]:
-        """Tìm kiếm symbols theo tên (fuzzy)."""
         if not self.is_indexed():
             return []
         return self.db.search(query, limit=limit)
 
     def _compute_pagerank(self):
-        """Tính PageRank cho tất cả symbols. Logic này vẫn cần truy cập trực tiếp SQLite."""
+        """Tính PageRank cho tất cả symbols. Chỉ hỗ trợ SQLite."""
+        if not hasattr(self.db, '_db'):
+            return
         import networkx as nx
-        # Tạm thời vẫn dùng conn trực tiếp vì đây là logic nội bộ của SQLite
-        if hasattr(self.db, '_db'):
-            raw_db = self.db._db
-            rows = raw_db.conn.execute(
-                "SELECT source_id, target_id, weight FROM edges WHERE type IN ('calls', 'references')"
-            ).fetchall()
-            if not rows:
-                return
-            G = nx.DiGraph()
-            for src, tgt, w in rows:
-                G.add_edge(src, tgt, weight=w)
-            all_symbols = raw_db.conn.execute("SELECT id FROM symbols").fetchall()
-            for (sym_id,) in all_symbols:
-                if sym_id not in G:
-                    G.add_node(sym_id)
-            pagerank = nx.pagerank(G, alpha=0.85, weight='weight')
-            for sym_id, rank in pagerank.items():
-                raw_db.conn.execute("UPDATE symbols SET pagerank = ? WHERE id = ?", (rank, sym_id))
-            raw_db.conn.commit()
+        raw_db = self.db._db
+        rows = raw_db.conn.execute(
+            "SELECT source_id, target_id, weight FROM edges WHERE type IN ('calls', 'references')"
+        ).fetchall()
+        if not rows:
+            return
+        G = nx.DiGraph()
+        for src, tgt, w in rows:
+            G.add_edge(src, tgt, weight=w)
+        all_symbols = raw_db.conn.execute("SELECT id FROM symbols").fetchall()
+        for (sym_id,) in all_symbols:
+            if sym_id not in G:
+                G.add_node(sym_id)
+        pagerank = nx.pagerank(G, alpha=0.85, weight='weight')
+        for sym_id, rank in pagerank.items():
+            raw_db.conn.execute("UPDATE symbols SET pagerank = ? WHERE id = ?", (rank, sym_id))
+        raw_db.conn.commit()
 
     def update_file(self, file_path: str):
-        """Cập nhật index cho một file cụ thể."""
+        """Cập nhật index cho một file cụ thể. Chỉ hỗ trợ SQLite."""
+        if not hasattr(self.db, '_db') or not self.indexer:
+            return
         if not self.db:
             self._ensure_db()
         self.indexer.index_file(file_path)
@@ -212,12 +277,12 @@ class CodeGraph:
                 metadatas = []
                 ids = []
                 for sym in symbols:
-                    text = self.graphrag._get_symbol_text(sym.dict() if hasattr(sym, 'dict') else sym)
+                    text = self.graphrag._get_symbol_text(sym.model_dump() if hasattr(sym, 'model_dump') else sym.__dict__)
                     texts.append(text)
                     metadatas.append({
                         "symbol_id": sym.id,
                         "name": sym.name,
-                        "kind": sym.kind.value,
+                        "kind": sym.kind.value if hasattr(sym.kind, 'value') else sym.kind,
                         "file_path": rel_path,
                         "start_line": sym.start_line,
                         "pagerank": sym.pagerank,
@@ -235,30 +300,31 @@ class CodeGraph:
             self.graphrag.summarize_communities()
 
     def get_blast_radius(self, symbol_id: str, max_depth: int = 3) -> Optional[BlastRadiusResult]:
-        """Tính toán blast radius."""
         if not self.db:
             return None
         return self.db.get_blast_radius(symbol_id, max_depth)
 
     def get_unused_symbols(self) -> List[Symbol]:
-        """Phát hiện dead code."""
         if not self.db:
             return []
         return self.db.get_unused_symbols()
 
+
+    def _ensure_multi_hop(self):
+        if self.multi_hop is None and self.db is not None:
+            raw_db = self.db._db if hasattr(self.db, '_db') else self.db
+            self.multi_hop = MultiHopEngine(raw_db)
+            
     def _ensure_graphrag(self):
-        if self.graphrag is None and self.db is not None:
+        if self.graphrag is None and hasattr(self.db, '_db'):
             try:
-                from ..graphrag import GraphRAGEngine
-                # GraphRAGEngine cần GraphDatabase gốc, không phải adapter
-                raw_db = self.db._db if hasattr(self.db, '_db') else self.db
+                raw_db = self.db._db
                 self.graphrag = GraphRAGEngine(raw_db, self.root)
             except Exception as e:
                 if self.io:
                     self.io.tool_warning(f"GraphRAG init failed: {e}")
 
     def semantic_search(self, query: str, limit: int = 10) -> list:
-        """Tìm kiếm ngữ nghĩa qua GraphRAG."""
         self._ensure_graphrag()
         if not self.graphrag:
             return []

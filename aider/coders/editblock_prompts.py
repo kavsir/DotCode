@@ -50,6 +50,7 @@ You can keep asking if you then decide you need to edit more files.
 
 All changes to files must use this *SEARCH/REPLACE block* format.
 ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
+Keep your reasoning brief. Only explain the essential changes.
 {shell_cmd_prompt}
 """
     example_messages = [

@@ -14,11 +14,13 @@ import sys
 import threading
 import time
 import traceback
+import re
+import os
+
+from dotcode.model_router import ModelRouter, TaskComplexity, SafeModelRouter
 from collections import defaultdict
 from datetime import datetime
 from dotcode.code_rag import CodeRAG
-import re
-import os
 from dotcode.graph.__init__old import CodeGraph
 from dotcode.hitl import HITLManager, RiskLevel
 from dotcode.agents.intent_agent import IntentAgent
@@ -346,7 +348,8 @@ class Coder:
         auto_copy_context=False,
         auto_accept_architect=True,
         code_graph = None,
-        code_rag = None
+        code_rag = None,        
+        
     ):
         # Fill in a dummy Analytics if needed, but it is never .enable()'d
         self.analytics = analytics if analytics is not None else Analytics()
@@ -505,7 +508,10 @@ class Coder:
         # DotCode: Khởi tạo Intent Agent
         self.intent_agent = IntentAgent()
         self.code_graph = None
-        self.code_rag = code_rag  # DotCode: LangChain CodeRAG (lazy init)
+        self.code_rag = code_rag
+        self.model_router = SafeModelRouter()
+        #self.io.tool_output("🔍 [DEBUG] model_router initialized")  # debug tạm thời
+        # DotCode: LangChain CodeRAG (lazy init)
         # DotCode: Khởi tạo HITL Manager
         self.hitl_manager = HITLManager()
         
@@ -980,13 +986,17 @@ class Coder:
             return
         
         if intent == "question":
+            self.pending_question = True
             self._auto_add_context(message, max_files=3)
             self._handle_question(message)
+            self.pending_question = False
             return
 
         if intent == "search":
+            self.pending_search = True
             self._auto_add_context(message, max_files=5)
             self._handle_search(message)
+            self.pending_search = False
             return
 
         # intent == "command": tự động thêm file liên quan rồi vào luồng Aider
@@ -1668,6 +1678,7 @@ class Coder:
         return True
 
     def send_message(self, inp):
+        #self.io.tool_output("🔍 [DEBUG] send_message called")
         self.event("message_send_starting")
 
         # Notify IO that LLM processing is starting
@@ -1682,6 +1693,31 @@ class Coder:
         if not self.check_tokens(messages):
             return
         self.warm_cache(chunks)
+
+        # ===== DotCode: Model Router =====
+        if hasattr(self, 'model_router'):
+            context_tokens = self.main_model.token_count(messages) if messages else 0
+            intent = "command"
+            if hasattr(self, 'pending_question') and self.pending_question:
+                intent = "question"
+            elif hasattr(self, 'pending_search') and self.pending_search:
+                intent = "search"
+
+            selected_model_name = self.model_router.get_safe_model(inp, intent, context_tokens)
+            
+            # Debug
+            #self.io.tool_output(f"🔍 [DEBUG] intent={intent}, tokens={context_tokens}, selected={selected_model_name}, current={self.main_model.name}")
+
+            if selected_model_name != self.main_model.name:
+                self.io.tool_output(
+                    f"🧠 Switching to {selected_model_name} for {intent} task ({context_tokens} tokens)"
+                )
+
+            saved_model = self.main_model
+            self.main_model = models.Model(selected_model_name)
+        else:
+            saved_model = self.main_model
+        # ===== Kết thúc DotCode =====
 
         if self.verbose:
             utils.show_messages(messages, functions=self.functions)
@@ -1772,6 +1808,11 @@ class Coder:
             self.partial_response_content = self.get_multi_response_content_in_progress(True)
             self.remove_reasoning_content()
             self.multi_response_content = ""
+
+            # ===== DotCode: Khôi phục model gốc =====
+            if hasattr(self, 'model_router'):
+                self.main_model = saved_model
+            # ===== Kết thúc DotCode =====
 
         ###
         # print()
@@ -2784,24 +2825,50 @@ class Coder:
             return accumulated_output
         
     def _handle_command(self, message):
-        """Xử lý command: cải thiện prompt để LLM tuân thủ SEARCH/REPLACE."""
-        # Tự động thêm file liên quan
-        self._auto_add_context(message, max_files=3)
+        """Xử lý command: tự động thêm file liên quan, chuyển sang editable, và thêm Special Note vào system prompt."""
+        # Tự động thêm file liên quan (vào read-only trước)
+        added_files = self._auto_add_context(message, max_files=3)
         
-        # Thêm hướng dẫn cụ thể vào message
-        enhanced_message = message + "\n\n(Hướng dẫn: Hãy trả lời BẰNG MỘT SEARCH/REPLACE block duy nhất. Nếu cần tạo file mới, dùng SEARCH trống. Chỉ trả về code, không giải thích.)"
+        # DotCode: Chuyển file từ read-only sang editable để LLM tự tin sửa
+        for abs_path in added_files:
+            if abs_path in self.abs_read_only_fnames:
+                self.abs_read_only_fnames.remove(abs_path)
+                self.abs_fnames.add(abs_path)
+                rel_path = os.path.relpath(abs_path, self.root)
+                self.io.tool_output(f"✏️ Switched to editable: {rel_path}")
         
-        # Gửi vào luồng Aider
-        while enhanced_message:
-            self.reflected_message = None
-            list(self.send_message(enhanced_message))
-            
-            if not self.reflected_message:
-                break
-            
-            if self.num_reflections >= self.max_reflections:
-                self.io.tool_warning(f"Only {self.max_reflections} reflections allowed, stopping.")
-                return
-            
-            self.num_reflections += 1
-            enhanced_message = self.reflected_message
+        # Lưu system prompt gốc
+        saved_prompt = self.gpt_prompts.main_system
+        
+        # Tạo danh sách file editable
+        editable_list = ", ".join([os.path.relpath(f, self.root) for f in self.abs_fnames]) if self.abs_fnames else "NONE"
+        
+        # Thêm Special Note vào system prompt
+        special_note = f"""
+
+    **🔓 DotCode Special Permission:**
+    The following files have been automatically added to your editable workspace: [{editable_list}]
+    You have EXPLICIT permission to edit these files. DO NOT ask to add them to the chat.
+    DO NOT question whether you can edit them. Just proceed with the SEARCH/REPLACE block immediately.
+    Focus ONLY on the user's request. Do not explain, do not think about file permissions.
+    """
+        self.gpt_prompts.main_system = saved_prompt + special_note
+        
+        try:
+            # Gửi vào luồng Aider
+            while message:
+                self.reflected_message = None
+                list(self.send_message(message))
+                
+                if not self.reflected_message:
+                    break
+                
+                if self.num_reflections >= self.max_reflections:
+                    self.io.tool_warning(f"Only {self.max_reflections} reflections allowed, stopping.")
+                    return
+                
+                self.num_reflections += 1
+                message = self.reflected_message
+        finally:
+            # Khôi phục system prompt gốc
+            self.gpt_prompts.main_system = saved_prompt
