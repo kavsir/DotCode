@@ -19,7 +19,7 @@ from datetime import datetime
 from dotcode.code_rag import CodeRAG
 import re
 import os
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 from dotcode.hitl import HITLManager, RiskLevel
 from dotcode.agents.intent_agent import IntentAgent
 

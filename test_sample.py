@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 
 # Trỏ đến thư mục dự án mẫu (đổi đường dẫn nếu cần)
 project_root = os.path.join(os.path.dirname(__file__), "sample_project")

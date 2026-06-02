@@ -167,13 +167,14 @@ class Indexer:
         code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
         tree = parser.parse(bytes(code, 'utf-8'))
 
-        symbols = self._extract_symbols(tree.root_node, file_path)
-        edges = self._extract_edges(tree.root_node, file_path, symbols)
+        # Dùng rel_path để tạo symbol ID nhất quán
+        rel_path = os.path.relpath(file_path, self.root)
         
-        # Thêm contains edges
+        symbols = self._extract_symbols(tree.root_node, rel_path)
+        edges = self._extract_edges(tree.root_node, rel_path, symbols)
+        
         self._add_contains_edges(symbols, edges)
         
-        rel_path = os.path.relpath(file_path, self.root)
         self.db.replace_symbols(rel_path, symbols)
         self.db.replace_edges(rel_path, edges)
 
@@ -189,7 +190,7 @@ class Indexer:
                             'source_id': sym['id'],
                             'target_id': other['id'],
                             'type': 'contains',
-                            'weight': 1.0
+                            'weight': 5.0
                         })
     # ========== QUERY-BASED SYMBOL EXTRACTION ==========
     def _extract_symbols_with_query(self, root_node, file_path, query_str, language):
@@ -412,7 +413,8 @@ class Indexer:
                             edges.append({
                                 'source_id': source_id,
                                 'target_id': target_id,
-                                'type': 'calls'
+                                'type': 'calls',
+                                'weight': 5.0
                             })
         for child in node.children:
             self._traverse_for_calls(child, file_path, symbols, symbol_map, edges)
@@ -488,32 +490,41 @@ class Indexer:
         return None
     
     def _add_import_references(self, file_path, symbols, edges):
-        """Tạo edges references từ các symbols trong file đến các symbols của module được import, có chọn lọc."""
+        """Tạo edges references từ class-level symbols đến class-level symbols của module được import."""
         imports = [e for e in edges if e['type'] == 'imports']
         if not imports:
             return
         
-        # Lấy tất cả các tên được sử dụng trong file (từ AST)
         used_names = self._get_used_names(file_path)
+        
+        # Lọc symbols cấp class (class và function standalone)
+        class_symbols = [s for s in symbols if s['kind'] in ('class', 'function')]
+        if not class_symbols:
+            class_symbols = symbols[:1]  # fallback
         
         for imp in imports:
             module_name = imp['target_id'].replace('module:', '')
-            # Tìm symbols trong module được import
             cur = self.db.conn.execute(
-                "SELECT id, name FROM symbols WHERE file_path LIKE ?",
+                "SELECT id, name, kind FROM symbols WHERE file_path LIKE ? AND kind IN ('class', 'function')",
                 (f"%{module_name}.py",)
             )
-            imported_symbols = {row[1]: row[0] for row in cur.fetchall()}  # name -> id
+            imported_symbols = {row[1]: row[0] for row in cur.fetchall()}
             
-            # Chỉ tạo cạnh cho các symbols có tên được sử dụng trong file
             for used_name in used_names:
                 if used_name in imported_symbols:
-                    for sym in symbols:
+                    for sym in class_symbols:
                         edges.append({
                             'source_id': sym['id'],
                             'target_id': imported_symbols[used_name],
                             'type': 'references',
-                            'weight': 0.8
+                            'weight': 5.0
+                        })
+                        # Thêm chiều ngược lại
+                        edges.append({
+                            'source_id': imported_symbols[used_name],
+                            'target_id': sym['id'],
+                            'type': 'references',
+                            'weight': 5.0
                         })
 
     def _traverse_for_symbols(self, node, file_path: str, symbols: list, parent_class=None):

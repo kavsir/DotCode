@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from dotcode.graph.database import GraphDatabase
 from dotcode.graph.indexer import Indexer
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 from dotcode.hitl import HITLManager, RiskLevel
 
 

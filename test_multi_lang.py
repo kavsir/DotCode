@@ -1,5 +1,5 @@
 'Set-Content -Path test_multi_lang.py -Value @'
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 
 # Khởi tạo CodeGraph trỏ vào thư mục mẫu đa ngôn ngữ
 cg = CodeGraph(root='multi_lang_sample')

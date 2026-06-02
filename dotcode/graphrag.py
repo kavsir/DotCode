@@ -56,7 +56,7 @@ class GraphRAGEngine:
         
         symbols = self.db.conn.execute("SELECT id FROM symbols").fetchall()
         edges = self.db.conn.execute(
-            "SELECT source_id, target_id FROM edges WHERE type IN ('calls', 'references', 'inherits')"
+            "SELECT source_id, target_id, weight FROM edges WHERE type IN ('calls', 'contains', 'inherits', 'references')"
         ).fetchall()
         
         if not symbols or not edges:
@@ -66,17 +66,21 @@ class GraphRAGEngine:
         id_to_idx = {sid: i for i, sid in enumerate(symbol_ids)}
         
         edge_list = []
-        for src, tgt in edges:
+        edge_weights = []
+        for src, tgt, w in edges:
             if src in id_to_idx and tgt in id_to_idx:
                 edge_list.append((id_to_idx[src], id_to_idx[tgt]))
+                edge_weights.append(w)
         
         if not edge_list:
             return 0
         
-        g = ig.Graph(n=len(symbol_ids), edges=edge_list, directed=True)
+        g = ig.Graph(n=len(symbol_ids), edges=edge_list, directed=False)
+        g.es['weight'] = edge_weights
         
         partition = leidenalg.find_partition(
             g, leidenalg.ModularityVertexPartition,
+            weights='weight',
             n_iterations=10
         )
         
@@ -86,13 +90,8 @@ class GraphRAGEngine:
         for i, comm_id in enumerate(partition.membership):
             symbol_id = symbol_ids[i]
             self.node_to_community[symbol_id] = comm_id
-            
             if comm_id not in self.communities:
-                self.communities[comm_id] = {
-                    "id": comm_id,
-                    "nodes": [],
-                    "summary": "",
-                }
+                self.communities[comm_id] = {"id": comm_id, "nodes": [], "summary": ""}
             self.communities[comm_id]["nodes"].append(symbol_id)
         
         return len(self.communities)

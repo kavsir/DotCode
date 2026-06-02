@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(0, "D:/DotCode")
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 
 cg = CodeGraph(root=".")
 cg.index()
