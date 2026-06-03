@@ -2,6 +2,7 @@
 import os
 import hashlib
 from pathlib import Path
+from platform import node
 import tree_sitter_languages
 import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjavascript
@@ -166,26 +167,31 @@ class Indexer:
         code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
         tree = parser.parse(bytes(code, 'utf-8'))
 
-        # Debug: in các node types ở cấp cao nhất cho TypeScript
-        if language == 'typescript':
-            print(f"Root children for {file_path}:")
-            for child in tree.root_node.children:
-                print(f"  {child.type}")
-
-        # Tạm thời bỏ query cho tất cả ngôn ngữ để test _traverse_generic
-        query_str = None
-        symbols = []
-
-        print(f"\n--- Traversing {file_path} ({language}) ---")
-        self._traverse_generic(tree.root_node, file_path, symbols)
-        print(f"Symbols found: {len(symbols)}")
-
-        edges = self._extract_edges(tree.root_node, file_path, symbols)
-
+        # Dùng rel_path để tạo symbol ID nhất quán
         rel_path = os.path.relpath(file_path, self.root)
+        
+        symbols = self._extract_symbols(tree.root_node, rel_path)
+        edges = self._extract_edges(tree.root_node, rel_path, symbols)
+        
+        self._add_contains_edges(symbols, edges)
+        
         self.db.replace_symbols(rel_path, symbols)
         self.db.replace_edges(rel_path, edges)
 
+
+    def _add_contains_edges(self, symbols, edges):
+        """Tạo edges 'contains' giữa class và methods của nó."""
+        for sym in symbols:
+            if sym['kind'] == 'class':
+                class_name = sym['name']
+                for other in symbols:
+                    if other['kind'] == 'method' and other.get('parent_class') == class_name:
+                        edges.append({
+                            'source_id': sym['id'],
+                            'target_id': other['id'],
+                            'type': 'contains',
+                            'weight': 5.0
+                        })
     # ========== QUERY-BASED SYMBOL EXTRACTION ==========
     def _extract_symbols_with_query(self, root_node, file_path, query_str, language):
         symbols = []
@@ -212,6 +218,10 @@ class Indexer:
                         symbols.append(sym)
         except Exception:
             self._traverse_generic(root_node, file_path, symbols)
+        return symbols
+    def _extract_symbols(self, root_node, file_path: str):
+        symbols = []
+        self._traverse_for_symbols(root_node, file_path, symbols, parent_class=None)
         return symbols
     # ========== GENERIC TRAVERSAL (FALLBACK) ==========
     def _traverse_generic(self, node, file_path, symbols=None, parent_class=None):
@@ -343,36 +353,97 @@ class Indexer:
         symbol_map = {s['name']: s['id'] for s in symbols}
         self._traverse_for_calls(root_node, file_path, symbols, symbol_map, edges)
         self._traverse_for_imports(root_node, file_path, edges)
+        self._add_import_references(file_path, symbols, edges)
         return edges
 
     def _traverse_for_calls(self, node, file_path, symbols, symbol_map, edges):
         if node.type == 'call':
             func_node = self._get_child(node, 'function')
-            if func_node and func_node.type == 'identifier':
-                target_name = func_node.text.decode('utf-8')
-                enclosing = self._find_enclosing_function(node)
-                if enclosing:
-                    source_name = enclosing.text.decode('utf-8')
-                    source_id = symbol_map.get(source_name)
-                    if not source_id:
-                        return
-                    target_id = symbol_map.get(target_name)
-                    if not target_id and self.db:
-                        cur = self.db.conn.execute(
-                            "SELECT id FROM symbols WHERE name = ? LIMIT 1",
-                            (target_name,)
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            target_id = row[0]
-                    if target_id and source_id != target_id:
-                        edges.append({
-                            'source_id': source_id,
-                            'target_id': target_id,
-                            'type': 'calls'
-                        })
+            if func_node:
+                target_name = None
+                if func_node.type == 'identifier':
+                    target_name = func_node.text.decode('utf-8')
+                elif func_node.type == 'attribute':
+                    # self.method() hoặc object.method()
+                    attr_node = self._get_child(func_node, 'attribute')
+                    if attr_node:
+                        target_name = attr_node.text.decode('utf-8')
+                    # Nếu là self.method, ta chỉ lấy method name
+                    if not target_name:
+                        # Thử lấy từ object
+                        obj_node = self._get_child(func_node, 'object')
+                        if obj_node and obj_node.type == 'identifier':
+                            target_name = obj_node.text.decode('utf-8')
+                
+                if target_name:
+                    enclosing = self._find_enclosing_function(node)
+                    if enclosing:
+                        source_name = enclosing.text.decode('utf-8')
+                        source_id = symbol_map.get(source_name)
+                        if not source_id:
+                            return
+                        
+                        # Tìm target trong cùng file trước
+                        target_id = symbol_map.get(target_name)
+                        # Nếu không có, tìm trong các module được import
+                        if not target_id and self.db:
+                            # Lấy danh sách imports của file hiện tại
+                            imports = self._get_imports_for_file(file_path)
+                            # Tìm target trong các module được import
+                            for imp_module in imports:
+                                cur = self.db.conn.execute(
+                                    "SELECT id FROM symbols WHERE name = ? AND file_path LIKE ? LIMIT 1",
+                                    (target_name, f"%{imp_module}.py")
+                                )
+                                row = cur.fetchone()
+                                if row:
+                                    target_id = row[0]
+                                    break
+                            # Nếu vẫn không tìm thấy, tìm trong toàn bộ database
+                            if not target_id:
+                                cur = self.db.conn.execute(
+                                    "SELECT id FROM symbols WHERE name = ? LIMIT 1",
+                                    (target_name,)
+                                )
+                                row = cur.fetchone()
+                                if row:
+                                    target_id = row[0]
+                        
+                        if target_id and source_id != target_id:
+                            edges.append({
+                                'source_id': source_id,
+                                'target_id': target_id,
+                                'type': 'calls',
+                                'weight': 5.0
+                            })
         for child in node.children:
             self._traverse_for_calls(child, file_path, symbols, symbol_map, edges)
+
+
+    def _get_imports_for_file(self, file_path):
+        """Lấy danh sách các module được import trong file."""
+        imports = set()
+        # Parse imports từ AST
+        code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
+        tree = PY_PARSER.parse(bytes(code, 'utf-8'))
+        self._collect_imports(tree.root_node, imports)
+        return imports
+    
+    def _collect_imports(self, node, imports):
+        """Đệ quy thu thập tên module từ import statements."""
+        if node.type == 'import_statement':
+            for child in node.children:
+                if child.type == 'dotted_name':
+                    module_name = child.text.decode('utf-8')
+                    imports.add(module_name)
+        elif node.type == 'import_from_statement':
+            for child in node.children:
+                if child.type == 'dotted_name':
+                    module_name = child.text.decode('utf-8')
+                    imports.add(module_name)
+                    break  # Chỉ lấy module chính
+        for child in node.children:
+            self._collect_imports(child, imports)
 
     def _traverse_for_imports(self, root_node, file_path, edges):
         self._find_imports_recursive(root_node, file_path, edges)
@@ -417,3 +488,111 @@ class Indexer:
                 return self._get_child(current, 'name')
             current = current.parent
         return None
+    
+    def _add_import_references(self, file_path, symbols, edges):
+        """Tạo edges references từ class-level symbols đến class-level symbols của module được import."""
+        imports = [e for e in edges if e['type'] == 'imports']
+        if not imports:
+            return
+        
+        used_names = self._get_used_names(file_path)
+        
+        # Lọc symbols cấp class (class và function standalone)
+        class_symbols = [s for s in symbols if s['kind'] in ('class', 'function')]
+        if not class_symbols:
+            class_symbols = symbols[:1]  # fallback
+        
+        for imp in imports:
+            module_name = imp['target_id'].replace('module:', '')
+            cur = self.db.conn.execute(
+                "SELECT id, name, kind FROM symbols WHERE file_path LIKE ? AND kind IN ('class', 'function')",
+                (f"%{module_name}.py",)
+            )
+            imported_symbols = {row[1]: row[0] for row in cur.fetchall()}
+            
+            for used_name in used_names:
+                if used_name in imported_symbols:
+                    for sym in class_symbols:
+                        edges.append({
+                            'source_id': sym['id'],
+                            'target_id': imported_symbols[used_name],
+                            'type': 'references',
+                            'weight': 5.0
+                        })
+                        # Thêm chiều ngược lại
+                        edges.append({
+                            'source_id': imported_symbols[used_name],
+                            'target_id': sym['id'],
+                            'type': 'references',
+                            'weight': 5.0
+                        })
+
+    def _traverse_for_symbols(self, node, file_path: str, symbols: list, parent_class=None):
+        """Đệ quy tìm function_definition và class_definition (Python)."""
+        if node.type == 'function_definition':
+            name_node = self._get_child(node, 'name')
+            if name_node:
+                name = name_node.text.decode('utf-8')
+                kind = 'method' if parent_class else 'function'
+                sym_id = f"{file_path}::{parent_class + '.' if parent_class else ''}{name}"
+                body_node = self._get_child(node, 'body')
+                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_hash = hashlib.md5(body_text.encode()).hexdigest()
+                symbols.append({
+                    'id': sym_id,
+                    'name': name,
+                    'kind': kind,
+                    'start_line': node.start_point[0] + 1,
+                    'end_line': node.end_point[0] + 1,
+                    'signature': name_node.parent.text.decode('utf-8').split(':')[0].strip() if name_node.parent else name,
+                    'body_hash': body_hash,
+                    'complexity': 0,
+                    'metadata': '{}',
+                    'parent_class': parent_class  # Thêm để dùng cho contains edges
+                })
+        elif node.type == 'class_definition':
+            name_node = self._get_child(node, 'name')
+            if name_node:
+                class_name = name_node.text.decode('utf-8')
+                sym_id = f"{file_path}::{class_name}"
+                body_node = self._get_child(node, 'body')
+                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_hash = hashlib.md5(body_text.encode()).hexdigest()
+                symbols.append({
+                    'id': sym_id,
+                    'name': class_name,
+                    'kind': 'class',
+                    'start_line': node.start_point[0] + 1,
+                    'end_line': node.end_point[0] + 1,
+                    'signature': f"class {class_name}",
+                    'body_hash': body_hash,
+                    'complexity': 0,
+                    'metadata': '{}',
+                    'parent_class': None
+                })
+                if body_node:
+                    for child in body_node.children:
+                        self._traverse_for_symbols(child, file_path, symbols, parent_class=class_name)
+                return  # Không duyệt tiếp vào class body ở vòng ngoài
+        if node.type != 'class_definition':
+            for child in node.children:
+                self._traverse_for_symbols(child, file_path, symbols, parent_class)
+
+    def _get_used_names(self, file_path):
+        """Lấy tất cả các tên (identifier, attribute) được sử dụng trong file."""
+        code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
+        tree = PY_PARSER.parse(bytes(code, 'utf-8'))
+        names = set()
+        self._collect_names(tree.root_node, names)
+        return names
+
+    def _collect_names(self, node, names):
+        """Đệ quy thu thập tên identifier và attribute."""
+        if node.type == 'identifier':
+            names.add(node.text.decode('utf-8'))
+        elif node.type == 'attribute':
+            attr_node = self._get_child(node, 'attribute')
+            if attr_node:
+                names.add(attr_node.text.decode('utf-8'))
+        for child in node.children:
+            self._collect_names(child, names)

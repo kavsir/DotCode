@@ -1,6 +1,8 @@
 import sqlite3
 import os
 
+from git import List, Optional
+from ..models import Symbol, Edge
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS symbols (
     id TEXT PRIMARY KEY,
@@ -50,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 class GraphDatabase:
     def __init__(self, db_path=":memory:"):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
         self.conn.row_factory = sqlite3.Row  # Để truy vấn trả về dict-like
@@ -112,3 +114,30 @@ class GraphDatabase:
     def count_symbols(self):
         cur = self.conn.execute("SELECT COUNT(*) FROM symbols")
         return cur.fetchone()[0]
+    
+    def get_symbol_as_model(self, symbol_id: str) -> Optional[Symbol]:
+        """Trả về Symbol object từ database row."""
+        row = self.get_symbol(symbol_id)
+        if row:
+            return Symbol(**row)
+        return None
+
+    def get_callees_as_models(self, symbol_id: str) -> List[Symbol]:
+        """Trả về danh sách Symbol objects."""
+        rows = self.get_callees(symbol_id)
+        return [Symbol(**r) for r in rows]
+
+    def get_callers_as_models(self, symbol_id: str) -> List[Symbol]:
+        """Trả về danh sách Symbol objects."""
+        rows = self.get_callers(symbol_id)
+        return [Symbol(**r) for r in rows]
+
+    def get_edges_as_models(self, symbol_id: str = None) -> List[Edge]:
+        """Trả về danh sách Edge objects, có thể lọc theo source_id."""
+        if symbol_id:
+            rows = self.conn.execute(
+                "SELECT * FROM edges WHERE source_id = ?", (symbol_id,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute("SELECT * FROM edges").fetchall()
+        return [Edge(**dict(r)) for r in rows]

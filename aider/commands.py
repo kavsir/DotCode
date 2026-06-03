@@ -650,7 +650,14 @@ class Commands:
         current_head_message = self.coder.repo.get_head_commit_message("(unknown)").strip()
         current_head_message = (current_head_message.splitlines() or [""])[0]
         self.io.tool_output(f"Now at:  {current_head_hash} {current_head_message}")
-
+        if hasattr(self.coder, 'code_graph') and self.coder.code_graph:
+            for fname in changed_files_last_commit:
+                abs_path = self.coder.abs_root_path(fname)
+                try:
+                    self.coder.code_graph.update_file(abs_path)
+                except Exception as e:
+                    self.coder.io.tool_warning(f"CodeGraph update failed for {fname}: {e}")
+                    
         if self.coder.main_model.send_undo_reply:
             return prompts.undo_command_reply
 

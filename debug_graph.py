@@ -1,5 +1,5 @@
 import os
-from dotcode.graph import CodeGraph
+from dotcode.graph.__init__old import CodeGraph
 
 root = "multi_lang_sample"
 cg = CodeGraph(root=root)
