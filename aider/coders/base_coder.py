@@ -1105,6 +1105,64 @@ class Coder:
 
     def _handle_question(self, message):
         """Xử lý câu hỏi: CodeRAG hoặc fallback prompt."""
+            # ===== DotCode: Global Search cho câu hỏi kiến trúc =====
+        architecture_keywords = [
+            "module chính", "cấu trúc dự án", "kiến trúc", "tổng quan",
+            "có những gì", "bao gồm những gì", "main module", "architecture",
+            "structure", "overview", "components", "có những module",
+            "những module chính", "dự án có những"
+        ]
+        #self.io.tool_output(f"🔍 [DEBUG] code_graph exists: {self.code_graph is not None}")
+        #if self.code_graph:
+            #self.io.tool_output(f"🔍 [DEBUG] graphrag exists: {self.code_graph.graphrag is not None}")
+            #if self.code_graph.graphrag:
+                #self.io.tool_output(f"🔍 [DEBUG] communities count: {len(self.code_graph.graphrag.communities) if self.code_graph.graphrag.communities else 0}")
+        
+        is_architecture_question = any(kw in message.lower() for kw in architecture_keywords)
+        
+        if is_architecture_question and self.code_graph:
+            # Đảm bảo GraphRAG engine đã sẵn sàng
+            if hasattr(self.code_graph, '_ensure_graphrag'):
+                self.code_graph._ensure_graphrag()
+            
+            # Giờ mới kiểm tra graphrag đã có chưa
+            if not self.code_graph.graphrag:
+                self.io.tool_output("⚠️ GraphRAG engine is not available. Index your codebase first.")
+                return
+            
+            # Đảm bảo communities đã được tạo
+            if not self.code_graph.graphrag.communities:
+                self.code_graph.graphrag.detect_communities()
+                self.code_graph.graphrag.summarize_communities()
+            
+            # Gọi global search
+            global_results = self.code_graph.graphrag.global_search(message, top_k=5)
+            # ... phần còn lại giữ nguyên
+            
+            # Đảm bảo communities đã được tạo
+            if not self.code_graph.graphrag.communities:
+                self.code_graph.graphrag.detect_communities()
+                self.code_graph.graphrag.summarize_communities()
+            
+            # Gọi global search
+            global_results = self.code_graph.graphrag.global_search(message, top_k=5)
+            
+            if global_results:
+                lines = ["📊 **Kiến trúc dự án:**"]
+                for i, result in enumerate(global_results, 1):
+                    summary = result.get("summary", "Không có mô tả")
+                    symbols = result.get("symbols", [])
+                    symbol_names = [f"{s.get('kind', '?')} {s.get('name', '?')}" for s in symbols[:5]]
+                    
+                    lines.append(f"\n**Module {i}:** {summary}")
+                    if symbol_names:
+                        lines.append(f"  *Thành phần chính:* {', '.join(symbol_names)}")
+                
+                self.io.tool_output("\n".join(lines))
+                return
+        
+        # ===== 1. CodeRAG (nếu có) =====
+        # ... (phần còn lại giữ nguyên)
         # ===== 1. CodeRAG (nếu có) =====
         if self.code_graph and not self.code_rag:
             if hasattr(self.code_graph, 'graphrag') and self.code_graph.graphrag:

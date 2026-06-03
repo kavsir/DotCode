@@ -332,6 +332,9 @@ class CodeGraph:
             self._ensure_db()
         self.indexer.index_file(file_path)
         self._compute_pagerank()
+        
+        # DotCode: Unified Feedback Loop - đảm bảo GraphRAG luôn được đồng bộ
+        self._ensure_graphrag()
         if self.graphrag:
             rel_path = os.path.relpath(file_path, self.root)
             symbols = self.db.get_symbols_in_file(rel_path)
@@ -364,8 +367,9 @@ class CodeGraph:
                         metadatas=metadatas,
                         ids=ids
                     )
-            self.graphrag.detect_communities()
-            self.graphrag.summarize_communities()
+            # Unified Feedback Loop: luôn cập nhật communities sau khi code thay đổi
+        self.graphrag.detect_communities()
+        self.graphrag.summarize_communities()
 
     def get_blast_radius(self, symbol_id: str, max_depth: int = 3) -> Optional[BlastRadiusResult]:
         if not self.db:
