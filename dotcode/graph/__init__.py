@@ -190,7 +190,9 @@ class CodeGraph:
         lines = []
         all_files = list(chat_files) + list(other_files)
         all_symbol_ids = []
+        seen_communities = set()
 
+        # === Phần 1: Mô tả từng file (giữ nguyên) ===
         for fname in all_files:
             if not os.path.exists(fname):
                 continue
@@ -215,17 +217,73 @@ class CodeGraph:
                     caller_names = [c.name for c in callers[:3]]
                     caller_str = f" ← called by: {', '.join(caller_names)}"
 
-                line = f"  {sym.kind.value if hasattr(sym.kind, 'value') else sym.kind} {sym.name}() (line {sym.start_line}){callee_str}{caller_str}"
+                kind_str = sym.kind.value if hasattr(sym.kind, 'value') else sym.kind
+                line = f"  {kind_str} {sym.name}() (line {sym.start_line}){callee_str}{caller_str}"
                 lines.append(line)
                 all_symbol_ids.append(sym.id)
+                
+                # Thu thập community của symbol này
+                if self.graphrag and hasattr(self.graphrag, 'node_to_community'):
+                    comm_id = self.graphrag.node_to_community.get(sym.id)
+                    if comm_id is not None and comm_id not in seen_communities:
+                        seen_communities.add(comm_id)
 
-        context = "\n".join(lines)
+        # === Phần 2: Semantic Context (MỚI) ===
+        if seen_communities and self.graphrag and hasattr(self.graphrag, 'communities'):
+            lines.append("")
+            lines.append("# 🏗️ Architecture Overview (Semantic Context):")
+            lines.append("")
+            
+            for comm_id in sorted(seen_communities)[:5]:  # Giới hạn 5 communities
+                comm_data = self.graphrag.communities.get(comm_id)
+                if not comm_data:
+                    continue
+                
+                summary = comm_data.get("summary", "")
+                if not summary:
+                    continue
+                
+                # Cắt ngắn summary nếu quá dài
+                if len(summary) > 200:
+                    summary = summary[:200] + "..."
+                
+                lines.append(f"## Community {comm_id}: {summary}")
+                
+                # Liệt kê các symbols chính trong community này
+                node_ids = comm_data.get("nodes", [])[:5]
+                key_symbols = []
+                for node_id in node_ids:
+                    sym = self.db.get_symbol(node_id)
+                    if sym:
+                        key_symbols.append(f"{sym.kind.value if hasattr(sym.kind, 'value') else sym.kind} {sym.name}")
+                
+                if key_symbols:
+                    lines.append(f"   Key symbols: {', '.join(key_symbols)}")
+                
+                # Tìm cross-community bridges
+                if len(seen_communities) > 1:
+                    for other_comm_id in seen_communities:
+                        if other_comm_id <= comm_id:
+                            continue
+                        if self.multi_hop:
+                            bridges = self.multi_hop.find_community_bridges(
+                                comm_id, other_comm_id,
+                                self.graphrag.node_to_community,
+                                edge_types=['calls', 'references']
+                            )
+                            if bridges:
+                                lines.append(f"   → Connected to Community {other_comm_id} via: {bridges[0]['source'].name} → {bridges[0]['target'].name} ({bridges[0]['edge_type']})")
+                
+                lines.append("")
 
+        # === Phần 3: SAGE memory context (giữ nguyên) ===
         if all_symbol_ids and self.sage:
             sage_context = self.sage.get_context_for_prompt(all_symbol_ids[:10])
             if sage_context:
-                context += "\n\n" + sage_context
+                lines.append("")
+                lines.append(sage_context)
 
+        context = "\n".join(lines)
         return context[:max_tokens * 4]
 
     def search(self, query: str, limit: int = 10) -> List[Symbol]:

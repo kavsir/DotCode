@@ -972,7 +972,8 @@ class Coder:
 
         # DotCode: Sử dụng Intent Agent để phân loại
         intent, confidence = self.intent_agent.classify(message)
-
+        #self.io.tool_output(f"🔍 [DEBUG] intent={intent}, confidence={confidence:.2f}")
+        
         if intent == "ambiguous":
             self.io.tool_output("🤔 Your request is ambiguous. Could you please clarify what you want me to do?")
             self.io.tool_output("   For example:")
@@ -1056,15 +1057,17 @@ class Coder:
                     seen_ids.add(sym['id'])
                     all_symbols.append(sym)
                     #self.io.tool_output(f"🔍 [DEBUG]   - {sym['name']} in {sym['file_path']}")
-        if self.code_graph and hasattr(self.code_graph, 'semantic_search'):
-            semantic_results = self.code_graph.semantic_search(message, limit=10)
-            for r in semantic_results:
-                detail = r.get('detail')
-                if detail and detail['id'] not in seen_ids:
-                    seen_ids.add(detail['id'])
-                    all_symbols.append(detail)
-        #self.io.tool_output(f"🔍 [DEBUG] Total unique symbols: {len(all_symbols)}")
-        
+
+        if self.code_graph and hasattr(self.code_graph, 'graphrag') and self.code_graph.graphrag:
+            try:
+                semantic_results = self.code_graph.graphrag.semantic_search(message, limit=10, boost_pagerank=True)
+                for r in semantic_results:
+                    detail = r.get('detail')
+                    if detail and detail['id'] not in seen_ids:
+                        seen_ids.add(detail['id'])
+                        all_symbols.append(detail)
+            except Exception:
+                pass
         if not all_symbols:
             #self.io.tool_output(f"🔍 [DEBUG] No symbols found, returning")
             return added_files
@@ -1077,9 +1080,10 @@ class Coder:
                 seen_files.add(file_path)
                 abs_path = self.abs_root_path(file_path)
                 exists = os.path.exists(abs_path)
-                #self.io.tool_output(f"🔍 [DEBUG] File: {file_path} -> {abs_path} (exists: {exists})")
                 if exists:
-                    ranked_files.append((abs_path, sym.get('pagerank', 0.0)))
+                    # Ưu tiên combined_score nếu có (từ semantic search), nếu không dùng pagerank
+                    score = sym.get('combined_score', sym.get('pagerank', 0.0))
+                    ranked_files.append((abs_path, score))
         
         #self.io.tool_output(f"🔍 [DEBUG] Ranked files: {len(ranked_files)}")
         ranked_files.sort(key=lambda x: x[1], reverse=True)
@@ -1146,6 +1150,10 @@ class Coder:
             self.io.tool_output("🔍 Code Graph Engine is not available for this project.")
             return
 
+        # Đảm bảo GraphRAG engine được khởi tạo
+        if hasattr(self.code_graph, '_ensure_graphrag'):
+            self.code_graph._ensure_graphrag()
+
         import re
         all_symbols = []
         seen_ids = set()
@@ -1160,20 +1168,23 @@ class Coder:
                     seen_ids.add(sym['id'])
                     all_symbols.append(sym)
 
-        # 2. Semantic search (bổ sung)
-        if hasattr(self.code_graph, 'semantic_search'):
+        # 2. Semantic search (bổ sung, có boosting)
+        if hasattr(self.code_graph, 'graphrag') and self.code_graph.graphrag:
             try:
-                semantic_results = self.code_graph.semantic_search(message, limit=10)
+                semantic_results = self.code_graph.graphrag.semantic_search(message, limit=10, boost_pagerank=True)
                 for r in semantic_results:
                     detail = r.get('detail')
                     if detail and detail['id'] not in seen_ids:
                         seen_ids.add(detail['id'])
+                        detail['combined_score'] = r.get('combined_score', 0.0)
                         all_symbols.append(detail)
-            except Exception:
-                pass
+            except Exception as e:
+                self.io.tool_output(f"🔍 Semantic search error: {e}")
 
-        # 3. Nếu có tên file cụ thể trong câu hỏi, lấy toàn bộ symbols của file đó
+        # 3. File mentions
         file_mentions = self.get_file_mentions(message)
+        #self.io.tool_output(f"🔍 [DEBUG] File mentions: {file_mentions}")
+        # ... rest of the method
         for rel_fname in file_mentions:
             abs_fname = self.abs_root_path(rel_fname)
             if os.path.exists(abs_fname):
@@ -1195,14 +1206,19 @@ class Coder:
 
         # 5. Hiển thị kết quả
         if all_symbols:
+            # Sắp xếp theo combined_score nếu có
+            all_symbols.sort(key=lambda x: x.get('combined_score', x.get('pagerank', 0.0)), reverse=True)
+            
             self.io.tool_output(f"🔍 Found {len(all_symbols)} results:")
             for sym in all_symbols[:10]:
                 kind = sym.get('kind', '?')
                 name = sym.get('name', '?')
                 file_path = sym.get('file_path', '?')
-                self.io.tool_output(f"  - {kind} {name} in {file_path}")
-        else:
-            self.io.tool_output("🔍 No results found.")
+                combined = sym.get('combined_score', 0.0)
+                if combined > 0:
+                    self.io.tool_output(f"  - {kind} {name} in {file_path} (score: {combined:.3f})")
+                else:
+                    self.io.tool_output(f"  - {kind} {name} in {file_path}")
 
     def check_and_open_urls(self, exc, friendly_msg=None):
         """Check exception for URLs, offer to open in a browser, with user-friendly error msgs."""

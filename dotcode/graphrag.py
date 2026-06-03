@@ -9,6 +9,7 @@ import chromadb
 from chromadb.config import Settings
 import igraph as ig
 import leidenalg
+from sympy import symbols
 
 
 class GraphRAGEngine:
@@ -349,17 +350,21 @@ class GraphRAGEngine:
         
         self.detect_communities()
         self.summarize_communities()
-        
+        self.auto_weight = self._compute_auto_weight()
         return len(symbols)
 
-    def semantic_search(self, query: str, limit: int = 10) -> List[Dict]:
+    def semantic_search(self, query: str, limit: int = 10, boost_pagerank: bool = True) -> List[Dict]:
+        """
+        Tìm kiếm ngữ nghĩa với PageRank boosting.
+        Code Graph (cấu trúc) + GraphRAG (ngữ nghĩa) = kết quả toàn diện.
+        """
         if not self.collection or self.collection.count() == 0:
             return []
         
         query_embedding = self.model.encode([query]).tolist()
         results = self.collection.query(
             query_embeddings=query_embedding,
-            n_results=limit,
+            n_results=limit * 2,  # Lấy gấp đôi để lọc
             include=["metadatas", "distances", "documents"]
         )
         
@@ -368,18 +373,36 @@ class GraphRAGEngine:
             for i, symbol_id in enumerate(results['ids'][0]):
                 metadata = results['metadatas'][0][i] if results['metadatas'] else {}
                 distance = results['distances'][0][i] if results['distances'] else 1.0
+                semantic_score = 1.0 - (distance / 2.0)
+                
                 sym = self.db.get_symbol(symbol_id) if self.db else None
                 
+                # DotCode: Kết hợp PageRank từ Code Graph
+                pagerank = sym.get('pagerank', 0.0) if sym else 0.0
+                
+                # Công thức kết hợp: semantic_score * (1 + pagerank)
+                # PageRank cao sẽ boost điểm số
+                if boost_pagerank and pagerank > 0:
+                    weight = getattr(self, 'auto_weight', 3.0)
+                    combined_score = semantic_score * (1.0 + pagerank * weight)
+                else:   
+                    combined_score = semantic_score
                 symbols.append({
                     'symbol_id': symbol_id,
                     'name': metadata.get('name', 'unknown'),
                     'kind': metadata.get('kind', 'unknown'),
                     'file_path': metadata.get('file_path', ''),
-                    'relevance': 1.0 - (distance / 2.0),
+                    'semantic_score': round(semantic_score, 3),
+                    'pagerank': round(pagerank, 4),
+                    'combined_score': round(combined_score, 3),
                     'detail': sym,
                 })
         
-        return symbols
+        # Sắp xếp lại theo combined_score
+        symbols.sort(key=lambda x: x['combined_score'], reverse=True)
+        
+        # Trả về top limit kết quả
+        return symbols[:limit]
 
     def get_context_for_prompt(self, query: str, max_symbols: int = 10) -> str:
         lines = []
@@ -406,3 +429,42 @@ class GraphRAGEngine:
                 lines.append(f"  - {kind} {name} in {file_path} (relevance: {relevance:.2f})")
         
         return "\n".join(lines)
+
+    def _compute_auto_weight(self) -> float:
+        """Tự động tính pagerank_weight dựa trên đặc điểm đồ thị."""
+        if not self.db:
+            return 3.0
+        
+        total_nodes = self.db.count_symbols()
+        if total_nodes == 0:
+            return 3.0
+        
+        edge_count = self.db.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE type IN ('calls', 'references', 'contains')"
+        ).fetchone()[0]
+        if edge_count == 0:
+            return 3.0
+        
+        edge_density = edge_count / total_nodes
+        
+        pagerank_stats = self.db.conn.execute(
+            "SELECT AVG(pagerank), AVG(pagerank * pagerank) FROM symbols WHERE pagerank > 0"
+        ).fetchone()
+        
+        if pagerank_stats and pagerank_stats[0] and pagerank_stats[1]:
+            mean_pr = pagerank_stats[0]
+            variance = pagerank_stats[1] - mean_pr * mean_pr
+            std_pr = variance ** 0.5 if variance > 0 else 0.001
+            cv = std_pr / mean_pr if mean_pr > 0 else 1.0
+        else:
+            cv = 1.0
+        
+        base_weight = 3.0
+        scale_by_nodes = max(1.0, total_nodes / 1000.0)
+        scale_by_density = 1.0 / max(edge_density, 0.1)
+        scale_by_cv = cv
+        
+        auto_weight = base_weight * scale_by_nodes * scale_by_density * scale_by_cv
+        auto_weight = max(1.0, min(10.0, auto_weight))
+        
+        return round(auto_weight, 2)
