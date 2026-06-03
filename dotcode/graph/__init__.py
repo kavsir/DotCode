@@ -15,10 +15,13 @@ from ..models import Symbol, SymbolKind, BlastRadiusResult
 
 
 class CodeGraph:
+    multi_hop = None  
     def __init__(self, root: str = None, db: GraphDBInterface = None, io=None):
         self.root = root or os.getcwd()
         self.io = io
         self.multi_hop = None
+        self.graphrag = None
+
 
         if db is not None:
             # Backend được truyền từ ngoài (giữ nguyên)
@@ -80,6 +83,7 @@ class CodeGraph:
         self.indexer = Indexer(raw_db, self.root)
         self.sage = SAGEEngine(raw_db)
         self.graphrag = None
+        self.multi_hop = None 
         if self.io:
             self.io.tool_output(f"📁 Code Graph database: {self.db_path}")
 
@@ -141,9 +145,15 @@ class CodeGraph:
         return name
 
     def _ensure_db(self):
-        """Tạo database và các thành phần liên quan nếu chưa có."""
+        """Tạo database và SQLiteAdapter nếu chưa có."""
         if self.db is None:
-            self._init_backend()
+            os.makedirs(self.db_dir, exist_ok=True)
+            raw_db = GraphDatabase(self.db_path)
+            self.db = SQLiteAdapter(raw_db)
+            self.indexer = Indexer(raw_db, self.root)
+            self.sage = SAGEEngine(raw_db)
+            self.graphrag = None
+            self.multi_hop = None
 
     def is_indexed(self) -> bool:
         if self.db is None:
