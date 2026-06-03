@@ -75,7 +75,7 @@ Expose 10+ tools for any AI agent:
 ### Install from source
 
 ```bash
-git clone https://github.com/yourusername/DotCode.git
+git clone https://github.com/kavsir/DotCode.git
 cd DotCode
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
