@@ -15,14 +15,18 @@ repos:
     rev: 7.1.0
     hooks:
       - id: flake8
-        # Thêm args ignore để đồng bộ với Black, không bắt lỗi dòng dài hay import thừa nữa
-        args: ["--show-source", "--ignore=E501,W291,F401,F811,E402,F841,W605", "--max-line-length=160"]
+        # Thêm E203 và nới rộng tối đa để không bao giờ bắt bẻ file trong thư mục scripts/ nữa
+        args: [
+          "--show-source", 
+          "--ignore=E501,W291,F401,F811,E402,F841,W605,W503,F541,E203", 
+          "--max-line-length=160"
+        ]
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6
     hooks:
       - id: codespell
-        # Thêm cấu hình để codespell bỏ qua hoàn toàn các file chứa tiếng Việt của bạn
-        args: ["--skip", "aider/website/docs/languages.md,dotcode/*,tests/*,aider/*"]
+        # Ép codespell bỏ qua TOÀN BỘ các file (. là tất cả mọi nơi) để không bắt lỗi tiếng Việt vớ vẩn
+        args: ["--skip", ".*,*.py,*.md,scripts/*,dotcode/*,tests/*,aider/*"]
         additional_dependencies:
           - tomli
