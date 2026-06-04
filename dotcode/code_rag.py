@@ -5,9 +5,11 @@ Hỗ trợ cả OpenAI và DeepSeek (nếu có DEEPSEEK_API_KEY).
 
 import os
 import sqlite3
+
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
+
 
 class CodeRAG:
     def __init__(self, code_graph, graphrag):
@@ -20,14 +22,14 @@ class CodeRAG:
         """Tạo LLM phù hợp dựa trên API key có sẵn."""
         deepseek_key = os.getenv("DEEPSEEK_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
-        
+
         if deepseek_key:
             # Dùng DeepSeek qua ChatOpenAI với base_url
             return ChatOpenAI(
                 model="deepseek-v4-flash",
                 temperature=0,
                 api_key=deepseek_key,
-                base_url="https://api.deepseek.com/v1"
+                base_url="https://api.deepseek.com/v1",
             )
         elif openai_key:
             # Dùng OpenAI
@@ -36,9 +38,12 @@ class CodeRAG:
             # Fallback: thử dùng model local qua Ollama
             try:
                 from langchain_ollama import ChatOllama
+
                 return ChatOllama(model="llama3.1:8b", temperature=0)
             except ImportError:
-                raise ValueError("No API key found. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, or install Ollama.")
+                raise ValueError(
+                    "No API key found. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, or install Ollama."
+                )
 
     def _get_fresh_connection(self):
         """Tạo kết nối SQLite mới cho thread hiện tại."""
@@ -56,32 +61,41 @@ class CodeRAG:
                 WHERE name LIKE ? OR signature LIKE ?
                 ORDER BY pagerank DESC
                 LIMIT 5""",
-                (f"%{query}%", f"%{query}%")
+                (f"%{query}%", f"%{query}%"),
             )
             symbols = [dict(row) for row in cur.fetchall()]
-            
+
             if not symbols:
                 return "No results found."
-            
+
             results = []
             for sym in symbols:
                 # Lấy callees
                 cur2 = conn.execute(
-                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE e.source_id = ? AND e.type = 'calls'",
-                    (sym['id'],)
+                    (
+                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE"
+                        " e.source_id = ? AND e.type = 'calls'"
+                    ),
+                    (sym["id"],),
                 )
                 callees = [row[0] for row in cur2.fetchall()]
                 callee_str = ", ".join(callees[:3]) if callees else "none"
-                
+
                 # Lấy callers
                 cur3 = conn.execute(
-                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE e.target_id = ? AND e.type = 'calls'",
-                    (sym['id'],)
+                    (
+                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE"
+                        " e.target_id = ? AND e.type = 'calls'"
+                    ),
+                    (sym["id"],),
                 )
                 callers = [row[0] for row in cur3.fetchall()]
                 caller_str = ", ".join(callers[:3]) if callers else "none"
-                
-                results.append(f"{sym['kind']} {sym['name']} in {sym['file_path']} (line {sym['start_line']}) -> calls: [{callee_str}], called by: [{caller_str}]")
+
+                results.append(
+                    f"{sym['kind']} {sym['name']} in {sym['file_path']} (line {sym['start_line']})"
+                    f" -> calls: [{callee_str}], called by: [{caller_str}]"
+                )
             return "\n".join(results)
         finally:
             conn.close()
@@ -91,7 +105,12 @@ class CodeRAG:
         results = self.graphrag.semantic_search(query, limit=5)
         if not results:
             return "No results found."
-        return "\n".join([f"{r['name']} ({r['kind']}) in {r['file_path']} - relevance: {r['relevance']:.2f}" for r in results])
+        return "\n".join(
+            [
+                f"{r['name']} ({r['kind']}) in {r['file_path']} - relevance: {r['relevance']:.2f}"
+                for r in results
+            ]
+        )
 
     def _create_agent(self):
         """Tạo LangChain Agent với các tool là Code Graph và GraphRAG."""

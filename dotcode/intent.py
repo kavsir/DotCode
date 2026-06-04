@@ -15,14 +15,15 @@ QUESTION_PATTERNS = [
     r"(\bfile\b.*\blàm gì\b)",
 ]
 
+
 def classify_intent(message: str) -> str:
     """Phân loại ý định của người dùng: 'ask' hoặc 'edit'."""
     message_lower = message.lower().strip()
-    
+
     # Kiểm tra nếu message giống câu hỏi
     for pattern in QUESTION_PATTERNS:
         if re.search(pattern, message_lower):
             return "ask"
-    
+
     # Mặc định là yêu cầu sửa code
     return "edit"

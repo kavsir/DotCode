@@ -1,10 +1,12 @@
 import re
 from enum import Enum
 
+
 class RiskLevel(Enum):
     LOW = "auto"
     MEDIUM = "confirm"
     HIGH = "approve"
+
 
 class HITLManager:
     def __init__(self):

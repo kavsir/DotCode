@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 db_path = os.path.join(root_dir, ".dotcode", "graph.db")

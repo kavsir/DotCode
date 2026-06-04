@@ -38,15 +38,20 @@ from aider.versioncheck import check_version, install_from_main_branch, install_
 from aider.watch import FileWatcher
 
 from .dump import dump  # noqa: F401
+
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 import os
+
 hf_token = os.getenv("HF_TOKEN")
 if hf_token:
     try:
         from huggingface_hub import login
+
         login(token=hf_token, add_to_git_credential=False)
     except Exception:
         pass  # Bỏ qua nếu không có huggingface_hub
+
+
 def check_config_files_for_yes(config_files):
     found = False
     for config_file in config_files:
