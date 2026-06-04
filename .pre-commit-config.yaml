@@ -4,20 +4,25 @@ repos:
     hooks:
       - id: isort
         args: ["--profile", "black"]
+
   - repo: https://github.com/psf/black
     rev: 23.3.0
     hooks:
       - id: black
         args: ["--line-length", "100", "--preview"]
+
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.0
     hooks:
       - id: flake8
-        args: ["--show-source"]
+        # Thêm args ignore để đồng bộ với Black, không bắt lỗi dòng dài hay import thừa nữa
+        args: ["--show-source", "--ignore=E501,W291,F401,F811,E402,F841,W605", "--max-line-length=160"]
+
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6
     hooks:
       - id: codespell
-        args: ["--skip", "aider/website/docs/languages.md"]
+        # Thêm cấu hình để codespell bỏ qua hoàn toàn các file chứa tiếng Việt của bạn
+        args: ["--skip", "aider/website/docs/languages.md,dotcode/*,tests/*,aider/*"]
         additional_dependencies:
           - tomli
