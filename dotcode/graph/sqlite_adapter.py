@@ -3,22 +3,25 @@ SQLiteAdapter - Triển khai GraphDBInterface cho SQLite.
 Bọc GraphDatabase hiện có và chuyển đổi dict sang Pydantic models.
 """
 
+import json
 from typing import List, Optional
+
+from ..models import BlastRadiusResult, Edge, EdgeType, Symbol, SymbolKind
 from .database import GraphDatabase
 from .interface import GraphDBInterface
-from ..models import Symbol, Edge, SymbolKind, EdgeType, BlastRadiusResult
-import json
+
 
 def _row_to_symbol(row: dict) -> Symbol:
     """Chuyển đổi row dict từ database thành Symbol object, xử lý metadata."""
     data = dict(row)
     # Parse metadata từ string JSON thành dict
-    if 'metadata' in data and isinstance(data['metadata'], str):
+    if "metadata" in data and isinstance(data["metadata"], str):
         try:
-            data['metadata'] = json.loads(data['metadata'])
+            data["metadata"] = json.loads(data["metadata"])
         except (json.JSONDecodeError, TypeError):
-            data['metadata'] = {}
+            data["metadata"] = {}
     return Symbol(**data)
+
 
 class SQLiteAdapter(GraphDBInterface):
     def __init__(self, db: GraphDatabase):
@@ -49,13 +52,13 @@ class SQLiteAdapter(GraphDBInterface):
         rows = self._db.get_callees(symbol_id)
         if rows:
             return [_row_to_symbol(r) for r in rows]
-        
+
         # Fallback: tìm symbol theo tên đơn giản
         matches = self.find_symbol_by_name(symbol_id)
         if matches:
             rows = self._db.get_callees(matches[0].id)
             return [_row_to_symbol(r) for r in rows]
-        
+
         return []
 
     def get_callers(self, symbol_id: str, depth: int = 1) -> List[Symbol]:
@@ -63,13 +66,13 @@ class SQLiteAdapter(GraphDBInterface):
         rows = self._db.get_callers(symbol_id)
         if rows:
             return [_row_to_symbol(r) for r in rows]
-        
+
         # Fallback: tìm symbol theo tên đơn giản
         matches = self.find_symbol_by_name(symbol_id)
         if matches:
             rows = self._db.get_callers(matches[0].id)
             return [_row_to_symbol(r) for r in rows]
-        
+
         return []
 
     def search(self, query: str, kind: str = None, limit: int = 10) -> List[Symbol]:
@@ -108,7 +111,7 @@ class SQLiteAdapter(GraphDBInterface):
             indirect_callers=[],
             callees=[],
             subclasses=[],
-            total_impact=0
+            total_impact=0,
         )
 
         result.direct_callers = self.get_callers(symbol_id)
@@ -130,15 +133,19 @@ class SQLiteAdapter(GraphDBInterface):
 
         if sym.kind == SymbolKind.CLASS:
             cur = self._db.conn.execute(
-                "SELECT s.* FROM symbols s JOIN edges e ON s.id = e.source_id "
-                "WHERE e.target_id = ? AND e.type = 'inherits'",
-                (symbol_id,)
+                (
+                    "SELECT s.* FROM symbols s JOIN edges e ON s.id = e.source_id "
+                    "WHERE e.target_id = ? AND e.type = 'inherits'"
+                ),
+                (symbol_id,),
             )
             result.subclasses = [_row_to_symbol(dict(row)) for row in cur.fetchall()]
 
         result.total_impact = (
-            len(result.direct_callers) + len(result.indirect_callers) +
-            len(result.callees) + len(result.subclasses)
+            len(result.direct_callers)
+            + len(result.indirect_callers)
+            + len(result.callees)
+            + len(result.subclasses)
         )
         return result
 
@@ -153,7 +160,7 @@ class SQLiteAdapter(GraphDBInterface):
             ORDER BY s.pagerank ASC
         """)
         return [_row_to_symbol(dict(row)) for row in cur.fetchall()]
-    
+
     def find_symbol_by_name(self, name: str, kind: str = None) -> List[Symbol]:
         """Tìm symbol theo tên đơn giản (không cần ID đầy đủ)."""
         sql = "SELECT * FROM symbols WHERE name = ?"
@@ -164,5 +171,6 @@ class SQLiteAdapter(GraphDBInterface):
         cur = self._db.conn.execute(sql, params)
         rows = cur.fetchall()
         return [_row_to_symbol(dict(r)) for r in rows]
+
     def close(self) -> None:
         self._db.conn.close()

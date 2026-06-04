@@ -3,9 +3,10 @@ DotCode Data Models - Pydantic models cho Symbol, Edge, Subgraph.
 Đảm bảo tính nhất quán dữ liệu xuyên suốt hệ thống.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class SymbolKind(str, Enum):
@@ -49,13 +50,17 @@ class Edge(BaseModel):
 class Subgraph(BaseModel):
     nodes: List[Symbol] = Field(default_factory=list)
     edges: List[Edge] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Subgraph-level metadata (e.g., community info)")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Subgraph-level metadata (e.g., community info)"
+    )
 
 
 class BlastRadiusResult(BaseModel):
     symbol: Symbol
     direct_callers: List[Symbol] = Field(default_factory=list)
-    indirect_callers: List[Dict[str, Any]] = Field(default_factory=list)  # {symbol: Symbol, depth: int}
+    indirect_callers: List[Dict[str, Any]] = Field(
+        default_factory=list
+    )  # {symbol: Symbol, depth: int}
     callees: List[Symbol] = Field(default_factory=list)
     subclasses: List[Symbol] = Field(default_factory=list)
     total_impact: int = 0

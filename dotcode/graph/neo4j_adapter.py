@@ -4,13 +4,17 @@ Hỗ trợ các dự án lớn với hàng trăm nghìn symbols.
 """
 
 from typing import List, Optional
+
 from neo4j import GraphDatabase as Neo4jDriver
+
+from ..models import BlastRadiusResult, Edge, EdgeType, Symbol, SymbolKind
 from .interface import GraphDBInterface
-from ..models import Symbol, Edge, SymbolKind, EdgeType, BlastRadiusResult
 
 
 class Neo4jAdapter(GraphDBInterface):
-    def __init__(self, uri: str = "bolt://localhost:7687", user: str = "neo4j", password: str = "password"):
+    def __init__(
+        self, uri: str = "bolt://localhost:7687", user: str = "neo4j", password: str = "password"
+    ):
         self._driver = Neo4jDriver.driver(uri, auth=(user, password))
         self._create_constraints()
 
@@ -31,11 +35,17 @@ class Neo4jAdapter(GraphDBInterface):
                     s.signature = $signature, s.docstring = $docstring,
                     s.body_hash = $body_hash, s.complexity = $complexity,
                     s.pagerank = $pagerank""",
-                id=symbol.id, name=symbol.name, kind=symbol.kind.value, file_path=symbol.file_path,
-                start_line=symbol.start_line, end_line=symbol.end_line,
-                signature=symbol.signature, docstring=symbol.docstring,
-                body_hash=symbol.body_hash, complexity=symbol.complexity,
-                pagerank=symbol.pagerank
+                id=symbol.id,
+                name=symbol.name,
+                kind=symbol.kind.value,
+                file_path=symbol.file_path,
+                start_line=symbol.start_line,
+                end_line=symbol.end_line,
+                signature=symbol.signature,
+                docstring=symbol.docstring,
+                body_hash=symbol.body_hash,
+                complexity=symbol.complexity,
+                pagerank=symbol.pagerank,
             )
 
     def add_edge(self, edge: Edge) -> None:
@@ -44,13 +54,17 @@ class Neo4jAdapter(GraphDBInterface):
                 f"""MATCH (s:Symbol {{id: $source_id}})
                 MATCH (t:Symbol {{id: $target_id}})
                 MERGE (s)-[:{edge.type.value.upper()} {{weight: $weight}}]->(t)""",
-                source_id=edge.source_id, target_id=edge.target_id, weight=edge.weight
+                source_id=edge.source_id,
+                target_id=edge.target_id,
+                weight=edge.weight,
             )
 
     def replace_symbols(self, file_path: str, symbols: List[Symbol]) -> None:
         with self._driver.session() as session:
             # Xóa symbols cũ của file
-            session.run("MATCH (s:Symbol {file_path: $file_path}) DETACH DELETE s", file_path=file_path)
+            session.run(
+                "MATCH (s:Symbol {file_path: $file_path}) DETACH DELETE s", file_path=file_path
+            )
             # Thêm symbols mới
             for sym in symbols:
                 self.add_symbol(sym)
@@ -60,7 +74,8 @@ class Neo4jAdapter(GraphDBInterface):
             # Xóa edges từ symbols của file
             session.run(
                 """MATCH (s:Symbol {file_path: $file_path})-[r]->()
-                DELETE r""", file_path=file_path
+                DELETE r""",
+                file_path=file_path,
             )
             # Thêm edges mới
             for edge in edges:
@@ -78,7 +93,7 @@ class Neo4jAdapter(GraphDBInterface):
         with self._driver.session() as session:
             result = session.run(
                 f"MATCH (s:Symbol {{id: $id}})-[:CALLS*1..{depth}]->(t:Symbol) RETURN DISTINCT t",
-                id=symbol_id
+                id=symbol_id,
             )
             return [self._node_to_symbol(record["t"]) for record in result]
 
@@ -86,7 +101,7 @@ class Neo4jAdapter(GraphDBInterface):
         with self._driver.session() as session:
             result = session.run(
                 f"MATCH (t:Symbol {{id: $id}})<-[:CALLS*1..{depth}]-(s:Symbol) RETURN DISTINCT s",
-                id=symbol_id
+                id=symbol_id,
             )
             return [self._node_to_symbol(record["s"]) for record in result]
 
@@ -101,7 +116,9 @@ class Neo4jAdapter(GraphDBInterface):
 
     def get_symbols_in_file(self, file_path: str) -> List[Symbol]:
         with self._driver.session() as session:
-            result = session.run("MATCH (s:Symbol {file_path: $file_path}) RETURN s", file_path=file_path)
+            result = session.run(
+                "MATCH (s:Symbol {file_path: $file_path}) RETURN s", file_path=file_path
+            )
             return [self._node_to_symbol(record["s"]) for record in result]
 
     def count_symbols(self) -> int:
@@ -126,14 +143,13 @@ class Neo4jAdapter(GraphDBInterface):
                 WHERE caller.id <> t.id
                 RETURN DISTINCT caller, length(path) AS depth
                 ORDER BY depth""",
-                id=symbol_id
+                id=symbol_id,
             )
             for record in result:
                 if record["caller"]["id"] not in [c.id for c in direct_callers]:
-                    indirect_callers.append({
-                        "symbol": self._node_to_symbol(record["caller"]),
-                        "depth": record["depth"]
-                    })
+                    indirect_callers.append(
+                        {"symbol": self._node_to_symbol(record["caller"]), "depth": record["depth"]}
+                    )
 
         # Callees
         callees = self.get_callees(symbol_id, depth=1)
@@ -143,8 +159,7 @@ class Neo4jAdapter(GraphDBInterface):
         if sym.kind == SymbolKind.CLASS:
             with self._driver.session() as session:
                 result = session.run(
-                    "MATCH (s:Symbol)-[:INHERITS]->(t:Symbol {id: $id}) RETURN s",
-                    id=symbol_id
+                    "MATCH (s:Symbol)-[:INHERITS]->(t:Symbol {id: $id}) RETURN s", id=symbol_id
                 )
                 subclasses = [self._node_to_symbol(record["s"]) for record in result]
 
@@ -156,19 +171,17 @@ class Neo4jAdapter(GraphDBInterface):
             indirect_callers=indirect_callers,
             callees=callees,
             subclasses=subclasses,
-            total_impact=total_impact
+            total_impact=total_impact,
         )
 
     def get_unused_symbols(self) -> List[Symbol]:
         with self._driver.session() as session:
-            result = session.run(
-                """MATCH (s:Symbol)
+            result = session.run("""MATCH (s:Symbol)
                 WHERE s.kind IN ['function', 'method']
                 AND NOT s.name IN ['main', '__init__', '__main__']
                 AND NOT (()-[r:CALLS]->(s))
                 RETURN s
-                ORDER BY s.pagerank ASC"""
-            )
+                ORDER BY s.pagerank ASC""")
             return [self._node_to_symbol(record["s"]) for record in result]
 
     def close(self) -> None:
@@ -189,5 +202,5 @@ class Neo4jAdapter(GraphDBInterface):
             docstring=data.get("docstring"),
             body_hash=data.get("body_hash"),
             complexity=data.get("complexity", 0),
-            pagerank=data.get("pagerank", 0.0)
+            pagerank=data.get("pagerank", 0.0),
         )

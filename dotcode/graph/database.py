@@ -1,8 +1,10 @@
-import sqlite3
 import os
+import sqlite3
 
 from git import List, Optional
-from ..models import Symbol, Edge
+
+from ..models import Edge, Symbol
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS symbols (
     id TEXT PRIMARY KEY,
@@ -49,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 """
 
+
 class GraphDatabase:
     def __init__(self, db_path=":memory:"):
         self.db_path = db_path
@@ -65,23 +68,35 @@ class GraphDatabase:
                 """INSERT OR REPLACE INTO symbols 
                 (id, name, kind, file_path, start_line, end_line, signature, body_hash, complexity, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sym['id'], sym['name'], sym['kind'], file_path,
-                 sym['start_line'], sym['end_line'], sym.get('signature'),
-                 sym.get('body_hash'), sym.get('complexity', 0), sym.get('metadata', '{}'))
+                (
+                    sym["id"],
+                    sym["name"],
+                    sym["kind"],
+                    file_path,
+                    sym["start_line"],
+                    sym["end_line"],
+                    sym.get("signature"),
+                    sym.get("body_hash"),
+                    sym.get("complexity", 0),
+                    sym.get("metadata", "{}"),
+                ),
             )
         self.conn.commit()
 
     def replace_edges(self, file_path: str, edges: list):
         """Xóa edges cũ liên quan đến file và chèn mới."""
-        self.conn.execute("""
+        self.conn.execute(
+            """
             DELETE FROM edges WHERE source_id IN 
             (SELECT id FROM symbols WHERE file_path = ?)
-        """, (file_path,))
+        """,
+            (file_path,),
+        )
         for edge in edges:
             self.conn.execute(
                 """INSERT OR REPLACE INTO edges (source_id, target_id, type, weight)
                 VALUES (?, ?, ?, ?)""",
-                (edge['source_id'], edge['target_id'], edge['type'], edge.get('weight', 1.0))
+                (edge["source_id"], edge["target_id"], edge["type"], edge.get("weight", 1.0)),
             )
         self.conn.commit()
 
@@ -96,25 +111,31 @@ class GraphDatabase:
 
     def get_callees(self, symbol_id: str):
         """Lấy những symbol được gọi bởi symbol_id."""
-        cur = self.conn.execute("""
+        cur = self.conn.execute(
+            """
             SELECT s.* FROM symbols s
             JOIN edges e ON s.id = e.target_id
             WHERE e.source_id = ? AND e.type = 'calls'
-        """, (symbol_id,))
+        """,
+            (symbol_id,),
+        )
         return [dict(row) for row in cur.fetchall()]
 
     def get_callers(self, symbol_id: str):
-        cur = self.conn.execute("""
+        cur = self.conn.execute(
+            """
             SELECT s.* FROM symbols s
             JOIN edges e ON s.id = e.source_id
             WHERE e.target_id = ? AND e.type = 'calls'
-        """, (symbol_id,))
+        """,
+            (symbol_id,),
+        )
         return [dict(row) for row in cur.fetchall()]
 
     def count_symbols(self):
         cur = self.conn.execute("SELECT COUNT(*) FROM symbols")
         return cur.fetchone()[0]
-    
+
     def get_symbol_as_model(self, symbol_id: str) -> Optional[Symbol]:
         """Trả về Symbol object từ database row."""
         row = self.get_symbol(symbol_id)

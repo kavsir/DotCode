@@ -1,14 +1,16 @@
 # dotcode/graph/indexer.py
-import os
 import hashlib
+import os
 from pathlib import Path
 from platform import node
+
+import tree_sitter_javascript as tsjavascript
 import tree_sitter_languages
 import tree_sitter_python as tspython
-import tree_sitter_javascript as tsjavascript
+import tree_sitter_rust as tsrust
 import tree_sitter_typescript as tstypescript
 from tree_sitter import Language, Parser
-import tree_sitter_rust as tsrust
+
 PY_LANGUAGE = Language(tspython.language())
 PY_PARSER = Parser(PY_LANGUAGE)
 
@@ -25,18 +27,20 @@ RUST_LANGUAGE = Language(tsrust.language())
 RUST_PARSER = Parser(RUST_LANGUAGE)
 
 HARD_LANGUAGES = {
-    'python': PY_LANGUAGE,
-    'javascript': JS_LANGUAGE,
-    'typescript': TS_LANGUAGE,
-    'tsx': TSX_LANGUAGE,
-    'rust': RUST_LANGUAGE,
+    "python": PY_LANGUAGE,
+    "javascript": JS_LANGUAGE,
+    "typescript": TS_LANGUAGE,
+    "tsx": TSX_LANGUAGE,
+    "rust": RUST_LANGUAGE,
 }
+
+
 class Indexer:
     def __init__(self, db, root: str):
         self.db = db
         self.root = root
-        self.parsers = {}       # Cache parser theo ngôn ngữ
-        self.queries = {}       # Cache query string theo ngôn ngữ
+        self.parsers = {}  # Cache parser theo ngôn ngữ
+        self.queries = {}  # Cache query string theo ngôn ngữ
         self.query_dir = os.path.join(os.path.dirname(__file__), "queries")
 
     # ========== LANGUAGE DETECTION ==========
@@ -44,70 +48,113 @@ class Indexer:
         ext = os.path.splitext(file_path)[1].lower()
         lang_map = {
             # Python
-            '.py': 'python', '.pyw': 'python', '.pyx': 'python', '.pxd': 'python', '.pxi': 'python',
+            ".py": "python",
+            ".pyw": "python",
+            ".pyx": "python",
+            ".pxd": "python",
+            ".pxi": "python",
             # JavaScript & TypeScript
-            '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-            '.ts': 'typescript', '.tsx': 'tsx', '.mts': 'typescript', '.cts': 'typescript',
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".mjs": "javascript",
+            ".cjs": "javascript",
+            ".ts": "typescript",
+            ".tsx": "tsx",
+            ".mts": "typescript",
+            ".cts": "typescript",
             # Web
-            '.html': 'html', '.htm': 'html', '.css': 'css', '.scss': 'scss', '.less': 'less',
-            '.vue': 'vue', '.svelte': 'svelte',
+            ".html": "html",
+            ".htm": "html",
+            ".css": "css",
+            ".scss": "scss",
+            ".less": "less",
+            ".vue": "vue",
+            ".svelte": "svelte",
             # Rust & Go
-            '.rs': 'rust', '.go': 'go',
+            ".rs": "rust",
+            ".go": "go",
             # Java & Kotlin
-            '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin',
+            ".java": "java",
+            ".kt": "kotlin",
+            ".kts": "kotlin",
             # C / C++
-            '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp',
+            ".c": "c",
+            ".h": "c",
+            ".cpp": "cpp",
+            ".cc": "cpp",
+            ".cxx": "cpp",
+            ".hpp": "cpp",
+            ".hh": "cpp",
             # Ruby
-            '.rb': 'ruby', '.rake': 'ruby',
+            ".rb": "ruby",
+            ".rake": "ruby",
             # PHP
-            '.php': 'php',
+            ".php": "php",
             # Swift
-            '.swift': 'swift',
+            ".swift": "swift",
             # Scala
-            '.scala': 'scala',
+            ".scala": "scala",
             # C#
-            '.cs': 'c_sharp',
+            ".cs": "c_sharp",
             # SQL
-            '.sql': 'sql',
+            ".sql": "sql",
             # Shell
-            '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
+            ".sh": "bash",
+            ".bash": "bash",
+            ".zsh": "bash",
             # Markdown & Text
-            '.md': 'markdown', '.mdx': 'markdown', '.txt': 'text',
+            ".md": "markdown",
+            ".mdx": "markdown",
+            ".txt": "text",
             # Config / Data
-            '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'toml',
-            '.xml': 'xml', '.csv': 'csv',
+            ".json": "json",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".toml": "toml",
+            ".xml": "xml",
+            ".csv": "csv",
             # Lua
-            '.lua': 'lua',
+            ".lua": "lua",
             # R
-            '.r': 'r', '.R': 'r',
+            ".r": "r",
+            ".R": "r",
             # Dart
-            '.dart': 'dart',
+            ".dart": "dart",
             # Elixir
-            '.ex': 'elixir', '.exs': 'elixir',
+            ".ex": "elixir",
+            ".exs": "elixir",
             # Erlang
-            '.erl': 'erlang', '.hrl': 'erlang',
+            ".erl": "erlang",
+            ".hrl": "erlang",
             # Haskell
-            '.hs': 'haskell',
+            ".hs": "haskell",
             # Clojure
-            '.clj': 'clojure', '.cljs': 'clojure', '.cljc': 'clojure', '.edn': 'clojure',
+            ".clj": "clojure",
+            ".cljs": "clojure",
+            ".cljc": "clojure",
+            ".end": "clojure",
             # OCaml
-            '.ml': 'ocaml', '.mli': 'ocaml',
+            ".ml": "ocaml",
+            ".mli": "ocaml",
             # Zig
-            '.zig': 'zig',
+            ".zig": "zig",
             # Nim
-            '.nim': 'nim',
+            ".nim": "nim",
             # Groovy
-            '.groovy': 'groovy',
+            ".groovy": "groovy",
             # Perl
-            '.pl': 'perl', '.pm': 'perl',
+            ".pl": "perl",
+            ".pm": "perl",
             # Julia
-            '.jl': 'julia',
+            ".jl": "julia",
             # Terraform
-            '.tf': 'terraform',
+            ".tf": "terraform",
             # Makefile
-            'makefile': 'make', 'Makefile': 'make',
+            "makefile": "make",
+            "Makefile": "make",
             # Dockerfile
-            'dockerfile': 'dockerfile', 'Dockerfile': 'dockerfile',
+            "dockerfile": "dockerfile",
+            "Dockerfile": "dockerfile",
         }
         # Xử lý đặc biệt cho file không có extension (Makefile, Dockerfile, ...)
         basename = os.path.basename(file_path).lower()
@@ -122,11 +169,11 @@ class Indexer:
 
         # Ưu tiên parser cứng đã import (hoạt động ổn định)
         hardcoded = {
-            'python': PY_PARSER,
-            'javascript': JS_PARSER,
-            'typescript': TS_PARSER,
-            'tsx': TSX_PARSER,
-            'rust': RUST_PARSER,
+            "python": PY_PARSER,
+            "javascript": JS_PARSER,
+            "typescript": TS_PARSER,
+            "tsx": TSX_PARSER,
+            "rust": RUST_PARSER,
         }
         parser = hardcoded.get(language)
         if parser:
@@ -164,34 +211,36 @@ class Indexer:
         if not parser:
             return
 
-        code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
-        tree = parser.parse(bytes(code, 'utf-8'))
+        code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        tree = parser.parse(bytes(code, "utf-8"))
 
         # Dùng rel_path để tạo symbol ID nhất quán
         rel_path = os.path.relpath(file_path, self.root)
-        
+
         symbols = self._extract_symbols(tree.root_node, rel_path)
         edges = self._extract_edges(tree.root_node, rel_path, symbols)
-        
+
         self._add_contains_edges(symbols, edges)
-        
+
         self.db.replace_symbols(rel_path, symbols)
         self.db.replace_edges(rel_path, edges)
-
 
     def _add_contains_edges(self, symbols, edges):
         """Tạo edges 'contains' giữa class và methods của nó."""
         for sym in symbols:
-            if sym['kind'] == 'class':
-                class_name = sym['name']
+            if sym["kind"] == "class":
+                class_name = sym["name"]
                 for other in symbols:
-                    if other['kind'] == 'method' and other.get('parent_class') == class_name:
-                        edges.append({
-                            'source_id': sym['id'],
-                            'target_id': other['id'],
-                            'type': 'contains',
-                            'weight': 5.0
-                        })
+                    if other["kind"] == "method" and other.get("parent_class") == class_name:
+                        edges.append(
+                            {
+                                "source_id": sym["id"],
+                                "target_id": other["id"],
+                                "type": "contains",
+                                "weight": 5.0,
+                            }
+                        )
+
     # ========== QUERY-BASED SYMBOL EXTRACTION ==========
     def _extract_symbols_with_query(self, root_node, file_path, query_str, language):
         symbols = []
@@ -219,31 +268,42 @@ class Indexer:
         except Exception:
             self._traverse_generic(root_node, file_path, symbols)
         return symbols
+
     def _extract_symbols(self, root_node, file_path: str):
         symbols = []
         self._traverse_for_symbols(root_node, file_path, symbols, parent_class=None)
         return symbols
+
     # ========== GENERIC TRAVERSAL (FALLBACK) ==========
     def _traverse_generic(self, node, file_path, symbols=None, parent_class=None):
         if symbols is None:
             symbols = []
 
         is_function = node.type in (
-            'function_definition', 'function_declaration', 'method_definition',
-            'function_item',
+            "function_definition",
+            "function_declaration",
+            "method_definition",
+            "function_item",
         )
         is_class = node.type in (
-            'class_definition', 'class_declaration',
-            'struct_item', 'impl_item',
+            "class_definition",
+            "class_declaration",
+            "struct_item",
+            "impl_item",
         )
 
         def get_name(n):
-            name_node = self._get_child(n, 'name')
+            name_node = self._get_child(n, "name")
             if name_node:
-                return name_node.text.decode('utf-8')
+                return name_node.text.decode("utf-8")
             for child in n.children:
-                if child.type in ('identifier', 'type_identifier', 'property_identifier', 'simple_identifier'):
-                    return child.text.decode('utf-8')
+                if child.type in (
+                    "identifier",
+                    "type_identifier",
+                    "property_identifier",
+                    "simple_identifier",
+                ):
+                    return child.text.decode("utf-8")
             return None
 
         # Xử lý function/class
@@ -255,34 +315,42 @@ class Indexer:
                 return
 
             if is_function:
-                kind = 'method' if parent_class else 'function'
+                kind = "method" if parent_class else "function"
                 sym_id = f"{file_path}::{parent_class + '.' if parent_class else ''}{name}"
-                body_node = self._get_child(node, 'body')
-                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_node = self._get_child(node, "body")
+                body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    'id': sym_id, 'name': name, 'kind': kind,
-                    'start_line': node.start_point[0] + 1,
-                    'end_line': node.end_point[0] + 1,
-                    'signature': name,
-                    'body_hash': body_hash,
-                    'complexity': 0,
-                    'metadata': '{}'
-                })
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": name,
+                        "kind": kind,
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": name,
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": "{}",
+                    }
+                )
             elif is_class:
                 sym_id = f"{file_path}::{name}"
-                body_node = self._get_child(node, 'body')
-                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_node = self._get_child(node, "body")
+                body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    'id': sym_id, 'name': name, 'kind': 'class',
-                    'start_line': node.start_point[0] + 1,
-                    'end_line': node.end_point[0] + 1,
-                    'signature': f"class {name}",
-                    'body_hash': body_hash,
-                    'complexity': 0,
-                    'metadata': '{}'
-                })
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": name,
+                        "kind": "class",
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": f"class {name}",
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": "{}",
+                    }
+                )
                 if body_node:
                     for child in body_node.children:
                         self._traverse_generic(child, file_path, symbols, name)
@@ -291,7 +359,7 @@ class Indexer:
             return
 
         # Xử lý các node bao bọc (expression_statement, program, module, script)
-        if node.type in ('expression_statement', 'program', 'module', 'script'):
+        if node.type in ("expression_statement", "program", "module", "script"):
             for child in node.children:
                 self._traverse_generic(child, file_path, symbols, parent_class)
             return
@@ -302,45 +370,45 @@ class Indexer:
 
     # ========== SYMBOL FACTORIES ==========
     def _make_function_symbol(self, node, file_path):
-        name_node = self._get_child(node, 'name')
+        name_node = self._get_child(node, "name")
         if not name_node:
             return None
-        name = name_node.text.decode('utf-8')
+        name = name_node.text.decode("utf-8")
         sym_id = f"{file_path}::{name}"
-        body_node = self._get_child(node, 'body')
-        body_text = body_node.text.decode('utf-8') if body_node else ''
+        body_node = self._get_child(node, "body")
+        body_text = body_node.text.decode("utf-8") if body_node else ""
         body_hash = hashlib.md5(body_text.encode()).hexdigest()
         return {
-            'id': sym_id,
-            'name': name,
-            'kind': 'function',
-            'start_line': node.start_point[0] + 1,
-            'end_line': node.end_point[0] + 1,
-            'signature': name,
-            'body_hash': body_hash,
-            'complexity': 0,
-            'metadata': '{}'
+            "id": sym_id,
+            "name": name,
+            "kind": "function",
+            "start_line": node.start_point[0] + 1,
+            "end_line": node.end_point[0] + 1,
+            "signature": name,
+            "body_hash": body_hash,
+            "complexity": 0,
+            "metadata": "{}",
         }
 
     def _make_class_symbol(self, node, file_path):
-        name_node = self._get_child(node, 'name')
+        name_node = self._get_child(node, "name")
         if not name_node:
             return None
-        name = name_node.text.decode('utf-8')
+        name = name_node.text.decode("utf-8")
         sym_id = f"{file_path}::{name}"
-        body_node = self._get_child(node, 'body')
-        body_text = body_node.text.decode('utf-8') if body_node else ''
+        body_node = self._get_child(node, "body")
+        body_text = body_node.text.decode("utf-8") if body_node else ""
         body_hash = hashlib.md5(body_text.encode()).hexdigest()
         return {
-            'id': sym_id,
-            'name': name,
-            'kind': 'class',
-            'start_line': node.start_point[0] + 1,
-            'end_line': node.end_point[0] + 1,
-            'signature': f"class {name}",
-            'body_hash': body_hash,
-            'complexity': 0,
-            'metadata': '{}'
+            "id": sym_id,
+            "name": name,
+            "kind": "class",
+            "start_line": node.start_point[0] + 1,
+            "end_line": node.end_point[0] + 1,
+            "signature": f"class {name}",
+            "body_hash": body_hash,
+            "complexity": 0,
+            "metadata": "{}",
         }
 
     def _make_method_symbol(self, node, file_path):
@@ -350,39 +418,39 @@ class Indexer:
     # ========== EDGE EXTRACTION ==========
     def _extract_edges(self, root_node, file_path, symbols):
         edges = []
-        symbol_map = {s['name']: s['id'] for s in symbols}
+        symbol_map = {s["name"]: s["id"] for s in symbols}
         self._traverse_for_calls(root_node, file_path, symbols, symbol_map, edges)
         self._traverse_for_imports(root_node, file_path, edges)
         self._add_import_references(file_path, symbols, edges)
         return edges
 
     def _traverse_for_calls(self, node, file_path, symbols, symbol_map, edges):
-        if node.type == 'call':
-            func_node = self._get_child(node, 'function')
+        if node.type == "call":
+            func_node = self._get_child(node, "function")
             if func_node:
                 target_name = None
-                if func_node.type == 'identifier':
-                    target_name = func_node.text.decode('utf-8')
-                elif func_node.type == 'attribute':
+                if func_node.type == "identifier":
+                    target_name = func_node.text.decode("utf-8")
+                elif func_node.type == "attribute":
                     # self.method() hoặc object.method()
-                    attr_node = self._get_child(func_node, 'attribute')
+                    attr_node = self._get_child(func_node, "attribute")
                     if attr_node:
-                        target_name = attr_node.text.decode('utf-8')
+                        target_name = attr_node.text.decode("utf-8")
                     # Nếu là self.method, ta chỉ lấy method name
                     if not target_name:
                         # Thử lấy từ object
-                        obj_node = self._get_child(func_node, 'object')
-                        if obj_node and obj_node.type == 'identifier':
-                            target_name = obj_node.text.decode('utf-8')
-                
+                        obj_node = self._get_child(func_node, "object")
+                        if obj_node and obj_node.type == "identifier":
+                            target_name = obj_node.text.decode("utf-8")
+
                 if target_name:
                     enclosing = self._find_enclosing_function(node)
                     if enclosing:
-                        source_name = enclosing.text.decode('utf-8')
+                        source_name = enclosing.text.decode("utf-8")
                         source_id = symbol_map.get(source_name)
                         if not source_id:
                             return
-                        
+
                         # Tìm target trong cùng file trước
                         target_id = symbol_map.get(target_name)
                         # Nếu không có, tìm trong các module được import
@@ -392,8 +460,11 @@ class Indexer:
                             # Tìm target trong các module được import
                             for imp_module in imports:
                                 cur = self.db.conn.execute(
-                                    "SELECT id FROM symbols WHERE name = ? AND file_path LIKE ? LIMIT 1",
-                                    (target_name, f"%{imp_module}.py")
+                                    (
+                                        "SELECT id FROM symbols WHERE name = ? AND file_path LIKE ?"
+                                        " LIMIT 1"
+                                    ),
+                                    (target_name, f"%{imp_module}.py"),
                                 )
                                 row = cur.fetchone()
                                 if row:
@@ -402,44 +473,44 @@ class Indexer:
                             # Nếu vẫn không tìm thấy, tìm trong toàn bộ database
                             if not target_id:
                                 cur = self.db.conn.execute(
-                                    "SELECT id FROM symbols WHERE name = ? LIMIT 1",
-                                    (target_name,)
+                                    "SELECT id FROM symbols WHERE name = ? LIMIT 1", (target_name,)
                                 )
                                 row = cur.fetchone()
                                 if row:
                                     target_id = row[0]
-                        
+
                         if target_id and source_id != target_id:
-                            edges.append({
-                                'source_id': source_id,
-                                'target_id': target_id,
-                                'type': 'calls',
-                                'weight': 5.0
-                            })
+                            edges.append(
+                                {
+                                    "source_id": source_id,
+                                    "target_id": target_id,
+                                    "type": "calls",
+                                    "weight": 5.0,
+                                }
+                            )
         for child in node.children:
             self._traverse_for_calls(child, file_path, symbols, symbol_map, edges)
-
 
     def _get_imports_for_file(self, file_path):
         """Lấy danh sách các module được import trong file."""
         imports = set()
         # Parse imports từ AST
-        code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
-        tree = PY_PARSER.parse(bytes(code, 'utf-8'))
+        code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        tree = PY_PARSER.parse(bytes(code, "utf-8"))
         self._collect_imports(tree.root_node, imports)
         return imports
-    
+
     def _collect_imports(self, node, imports):
         """Đệ quy thu thập tên module từ import statements."""
-        if node.type == 'import_statement':
+        if node.type == "import_statement":
             for child in node.children:
-                if child.type == 'dotted_name':
-                    module_name = child.text.decode('utf-8')
+                if child.type == "dotted_name":
+                    module_name = child.text.decode("utf-8")
                     imports.add(module_name)
-        elif node.type == 'import_from_statement':
+        elif node.type == "import_from_statement":
             for child in node.children:
-                if child.type == 'dotted_name':
-                    module_name = child.text.decode('utf-8')
+                if child.type == "dotted_name":
+                    module_name = child.text.decode("utf-8")
                     imports.add(module_name)
                     break  # Chỉ lấy module chính
         for child in node.children:
@@ -449,29 +520,29 @@ class Indexer:
         self._find_imports_recursive(root_node, file_path, edges)
 
     def _find_imports_recursive(self, node, file_path, edges):
-        if node.type == 'import_statement':
+        if node.type == "import_statement":
             for child in node.children:
-                if child.type == 'dotted_name':
-                    module_name = child.text.decode('utf-8')
+                if child.type == "dotted_name":
+                    module_name = child.text.decode("utf-8")
                     file_id = f"file:{os.path.relpath(file_path, self.root)}"
-                    edges.append({
-                        'source_id': file_id,
-                        'target_id': f"module:{module_name}",
-                        'type': 'imports'
-                    })
-        elif node.type == 'import_from_statement':
+                    edges.append(
+                        {
+                            "source_id": file_id,
+                            "target_id": f"module:{module_name}",
+                            "type": "imports",
+                        }
+                    )
+        elif node.type == "import_from_statement":
             module_name = None
             for child in node.children:
-                if child.type == 'dotted_name':
+                if child.type == "dotted_name":
                     if module_name is None:
-                        module_name = child.text.decode('utf-8')
+                        module_name = child.text.decode("utf-8")
             if module_name:
                 file_id = f"file:{os.path.relpath(file_path, self.root)}"
-                edges.append({
-                    'source_id': file_id,
-                    'target_id': f"module:{module_name}",
-                    'type': 'imports'
-                })
+                edges.append(
+                    {"source_id": file_id, "target_id": f"module:{module_name}", "type": "imports"}
+                )
         for child in node.children:
             self._find_imports_recursive(child, file_path, edges)
 
@@ -482,117 +553,138 @@ class Indexer:
     def _find_enclosing_function(self, node):
         current = node.parent
         while current:
-            if current.type in ('function_definition', 'class_definition',
-                                'function_declaration', 'class_declaration',
-                                'method_definition'):
-                return self._get_child(current, 'name')
+            if current.type in (
+                "function_definition",
+                "class_definition",
+                "function_declaration",
+                "class_declaration",
+                "method_definition",
+            ):
+                return self._get_child(current, "name")
             current = current.parent
         return None
-    
+
     def _add_import_references(self, file_path, symbols, edges):
         """Tạo edges references từ class-level symbols đến class-level symbols của module được import."""
-        imports = [e for e in edges if e['type'] == 'imports']
+        imports = [e for e in edges if e["type"] == "imports"]
         if not imports:
             return
-        
+
         used_names = self._get_used_names(file_path)
-        
+
         # Lọc symbols cấp class (class và function standalone)
-        class_symbols = [s for s in symbols if s['kind'] in ('class', 'function')]
+        class_symbols = [s for s in symbols if s["kind"] in ("class", "function")]
         if not class_symbols:
             class_symbols = symbols[:1]  # fallback
-        
+
         for imp in imports:
-            module_name = imp['target_id'].replace('module:', '')
+            module_name = imp["target_id"].replace("module:", "")
             cur = self.db.conn.execute(
-                "SELECT id, name, kind FROM symbols WHERE file_path LIKE ? AND kind IN ('class', 'function')",
-                (f"%{module_name}.py",)
+                (
+                    "SELECT id, name, kind FROM symbols WHERE file_path LIKE ? AND kind IN"
+                    " ('class', 'function')"
+                ),
+                (f"%{module_name}.py",),
             )
             imported_symbols = {row[1]: row[0] for row in cur.fetchall()}
-            
+
             for used_name in used_names:
                 if used_name in imported_symbols:
                     for sym in class_symbols:
-                        edges.append({
-                            'source_id': sym['id'],
-                            'target_id': imported_symbols[used_name],
-                            'type': 'references',
-                            'weight': 5.0
-                        })
+                        edges.append(
+                            {
+                                "source_id": sym["id"],
+                                "target_id": imported_symbols[used_name],
+                                "type": "references",
+                                "weight": 5.0,
+                            }
+                        )
                         # Thêm chiều ngược lại
-                        edges.append({
-                            'source_id': imported_symbols[used_name],
-                            'target_id': sym['id'],
-                            'type': 'references',
-                            'weight': 5.0
-                        })
+                        edges.append(
+                            {
+                                "source_id": imported_symbols[used_name],
+                                "target_id": sym["id"],
+                                "type": "references",
+                                "weight": 5.0,
+                            }
+                        )
 
     def _traverse_for_symbols(self, node, file_path: str, symbols: list, parent_class=None):
         """Đệ quy tìm function_definition và class_definition (Python)."""
-        if node.type == 'function_definition':
-            name_node = self._get_child(node, 'name')
+        if node.type == "function_definition":
+            name_node = self._get_child(node, "name")
             if name_node:
-                name = name_node.text.decode('utf-8')
-                kind = 'method' if parent_class else 'function'
+                name = name_node.text.decode("utf-8")
+                kind = "method" if parent_class else "function"
                 sym_id = f"{file_path}::{parent_class + '.' if parent_class else ''}{name}"
-                body_node = self._get_child(node, 'body')
-                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_node = self._get_child(node, "body")
+                body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    'id': sym_id,
-                    'name': name,
-                    'kind': kind,
-                    'start_line': node.start_point[0] + 1,
-                    'end_line': node.end_point[0] + 1,
-                    'signature': name_node.parent.text.decode('utf-8').split(':')[0].strip() if name_node.parent else name,
-                    'body_hash': body_hash,
-                    'complexity': 0,
-                    'metadata': '{}',
-                    'parent_class': parent_class  # Thêm để dùng cho contains edges
-                })
-        elif node.type == 'class_definition':
-            name_node = self._get_child(node, 'name')
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": name,
+                        "kind": kind,
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": (
+                            name_node.parent.text.decode("utf-8").split(":")[0].strip()
+                            if name_node.parent
+                            else name
+                        ),
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": "{}",
+                        "parent_class": parent_class,  # Thêm để dùng cho contains edges
+                    }
+                )
+        elif node.type == "class_definition":
+            name_node = self._get_child(node, "name")
             if name_node:
-                class_name = name_node.text.decode('utf-8')
+                class_name = name_node.text.decode("utf-8")
                 sym_id = f"{file_path}::{class_name}"
-                body_node = self._get_child(node, 'body')
-                body_text = body_node.text.decode('utf-8') if body_node else ''
+                body_node = self._get_child(node, "body")
+                body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    'id': sym_id,
-                    'name': class_name,
-                    'kind': 'class',
-                    'start_line': node.start_point[0] + 1,
-                    'end_line': node.end_point[0] + 1,
-                    'signature': f"class {class_name}",
-                    'body_hash': body_hash,
-                    'complexity': 0,
-                    'metadata': '{}',
-                    'parent_class': None
-                })
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": class_name,
+                        "kind": "class",
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": f"class {class_name}",
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": "{}",
+                        "parent_class": None,
+                    }
+                )
                 if body_node:
                     for child in body_node.children:
-                        self._traverse_for_symbols(child, file_path, symbols, parent_class=class_name)
+                        self._traverse_for_symbols(
+                            child, file_path, symbols, parent_class=class_name
+                        )
                 return  # Không duyệt tiếp vào class body ở vòng ngoài
-        if node.type != 'class_definition':
+        if node.type != "class_definition":
             for child in node.children:
                 self._traverse_for_symbols(child, file_path, symbols, parent_class)
 
     def _get_used_names(self, file_path):
         """Lấy tất cả các tên (identifier, attribute) được sử dụng trong file."""
-        code = Path(file_path).read_text(encoding='utf-8', errors='ignore')
-        tree = PY_PARSER.parse(bytes(code, 'utf-8'))
+        code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        tree = PY_PARSER.parse(bytes(code, "utf-8"))
         names = set()
         self._collect_names(tree.root_node, names)
         return names
 
     def _collect_names(self, node, names):
         """Đệ quy thu thập tên identifier và attribute."""
-        if node.type == 'identifier':
-            names.add(node.text.decode('utf-8'))
-        elif node.type == 'attribute':
-            attr_node = self._get_child(node, 'attribute')
+        if node.type == "identifier":
+            names.add(node.text.decode("utf-8"))
+        elif node.type == "attribute":
+            attr_node = self._get_child(node, "attribute")
             if attr_node:
-                names.add(attr_node.text.decode('utf-8'))
+                names.add(attr_node.text.decode("utf-8"))
         for child in node.children:
             self._collect_names(child, names)

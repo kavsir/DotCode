@@ -4,9 +4,9 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from dotcode.graph.__init__old import CodeGraph
 from dotcode.graph.database import GraphDatabase
 from dotcode.graph.indexer import Indexer
-from dotcode.graph.__init__old import CodeGraph
 from dotcode.hitl import HITLManager, RiskLevel
 
 
@@ -14,20 +14,42 @@ def test_database():
     """Test database schema, insert, query."""
     db = GraphDatabase(":memory:")
     symbols = [
-        {'id': 'test.py::hello', 'name': 'hello', 'kind': 'function', 'start_line': 1, 'end_line': 3, 'signature': 'def hello():', 'body_hash': 'abc', 'complexity': 1, 'metadata': '{}'},
-        {'id': 'test.py::world', 'name': 'world', 'kind': 'function', 'start_line': 5, 'end_line': 7, 'signature': 'def world():', 'body_hash': 'def', 'complexity': 2, 'metadata': '{}'}
+        {
+            "id": "test.py::hello",
+            "name": "hello",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 3,
+            "signature": "def hello():",
+            "body_hash": "abc",
+            "complexity": 1,
+            "metadata": "{}",
+        },
+        {
+            "id": "test.py::world",
+            "name": "world",
+            "kind": "function",
+            "start_line": 5,
+            "end_line": 7,
+            "signature": "def world():",
+            "body_hash": "def",
+            "complexity": 2,
+            "metadata": "{}",
+        },
     ]
-    db.replace_symbols('test.py', symbols)
+    db.replace_symbols("test.py", symbols)
     assert db.count_symbols() == 2
-    db.replace_edges('test.py', [{'source_id': 'test.py::hello', 'target_id': 'test.py::world', 'type': 'calls'}])
-    assert len(db.get_callees('test.py::hello')) == 1
-    assert len(db.get_callers('test.py::world')) == 1
-    assert db.get_symbol('test.py::hello')['name'] == 'hello'
+    db.replace_edges(
+        "test.py", [{"source_id": "test.py::hello", "target_id": "test.py::world", "type": "calls"}]
+    )
+    assert len(db.get_callees("test.py::hello")) == 1
+    assert len(db.get_callers("test.py::world")) == 1
+    assert db.get_symbol("test.py::hello")["name"] == "hello"
 
 
 def test_indexer():
     """Test tree-sitter indexer extracts symbols (edges under development)."""
-    code = '''
+    code = """
 def helper():
     return 42
 
@@ -41,8 +63,8 @@ class Calculator:
 
     def compute(self):
         return self.add(1, 2)
-'''
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         tmp = f.name
     try:
@@ -61,7 +83,7 @@ def test_codegraph_context():
     tmpdir = tempfile.mkdtemp()
     try:
         fname = os.path.join(tmpdir, "t.py")
-        with open(fname, 'w') as f:
+        with open(fname, "w") as f:
             f.write("def foo(): pass\ndef bar():\n  foo()\n")
         cg = CodeGraph(root=tmpdir)
         cg.index()
@@ -70,6 +92,7 @@ def test_codegraph_context():
         cg.db.conn.close()
     finally:
         import shutil
+
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -81,6 +104,7 @@ def test_sage_memory():
         CREATE TABLE IF NOT EXISTS event_symbols (event_id TEXT NOT NULL, symbol_id TEXT NOT NULL, relevance REAL DEFAULT 1.0, PRIMARY KEY (event_id, symbol_id));
     """)
     from dotcode.sage import SAGEEngine
+
     sage = SAGEEngine(db)
     eid = sage.remember("bug_fix", "null pointer", ["main.py::main"])
     assert len(sage.recall("null")) == 1
