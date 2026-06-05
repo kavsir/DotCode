@@ -47,19 +47,24 @@ class CodeRAG:
 
     def _get_fresh_connection(self):
         """Tạo kết nối SQLite mới cho thread hiện tại."""
-        conn = sqlite3.connect(self.code_graph.db.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        if hasattr(self.code_graph.db, '_db'):
+            raw_db = self.code_graph.db._db
+            conn = sqlite3.connect(raw_db.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+        else:
+            conn = sqlite3.connect(self.code_graph.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
 
     def _query_code_graph_impl(self, query: str) -> str:
-        """Tìm kiếm trên Code Graph và trả về kết quả dạng text."""
+        """Tìm kiếm trên Code Graph và trả về kết quả dạng text, bao gồm HTTP metadata."""
         conn = self._get_fresh_connection()
         try:
-            # Tìm kiếm symbols
             cur = conn.execute(
                 """SELECT * FROM symbols 
                 WHERE name LIKE ? OR signature LIKE ?
-                ORDER BY pagerank DESC
+                ORDER BY COALESCE(pagerank, 0.0) DESC
                 LIMIT 5""",
                 (f"%{query}%", f"%{query}%"),
             )
@@ -72,10 +77,7 @@ class CodeRAG:
             for sym in symbols:
                 # Lấy callees
                 cur2 = conn.execute(
-                    (
-                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE"
-                        " e.source_id = ? AND e.type = 'calls'"
-                    ),
+                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE e.source_id = ? AND e.type = 'calls'",
                     (sym["id"],),
                 )
                 callees = [row[0] for row in cur2.fetchall()]
@@ -83,17 +85,25 @@ class CodeRAG:
 
                 # Lấy callers
                 cur3 = conn.execute(
-                    (
-                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE"
-                        " e.target_id = ? AND e.type = 'calls'"
-                    ),
+                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE e.target_id = ? AND e.type = 'calls'",
                     (sym["id"],),
                 )
                 callers = [row[0] for row in cur3.fetchall()]
                 caller_str = ", ".join(callers[:3]) if callers else "none"
 
+                # DotCode: Parse metadata để hiển thị HTTP path
+                meta_str = sym.get("metadata", "{}")
+                http_info = ""
+                try:
+                    import json
+                    meta = json.loads(meta_str) if meta_str else {}
+                    if meta.get("method") and meta.get("path"):
+                        http_info = f" [{meta['method']} {meta['path']}]"
+                except Exception:
+                    pass
+
                 results.append(
-                    f"{sym['kind']} {sym['name']} in {sym['file_path']} (line {sym['start_line']})"
+                    f"{sym['kind']} {sym['name']}{http_info} in {sym['file_path']} (line {sym['start_line']})"
                     f" -> calls: [{callee_str}], called by: [{caller_str}]"
                 )
             return "\n".join(results)
@@ -105,12 +115,28 @@ class CodeRAG:
         results = self.graphrag.semantic_search(query, limit=5)
         if not results:
             return "No results found."
-        return "\n".join(
-            [
-                f"{r['name']} ({r['kind']}) in {r['file_path']} - relevance: {r['relevance']:.2f}"
-                for r in results
-            ]
-        )
+        lines = []
+        for r in results:
+            name = r.get('name', 'unknown')
+            kind = r.get('kind', 'unknown')
+            file_path = r.get('file_path', '')
+            relevance = r.get('relevance', 0.0)
+            
+            # DotCode: Thêm HTTP metadata nếu có
+            detail = r.get('detail', {})
+            http_info = ""
+            if detail:
+                meta_str = detail.get('metadata', '{}')
+                try:
+                    import json
+                    meta = json.loads(meta_str) if isinstance(meta_str, str) else meta_str
+                    if meta.get("method") and meta.get("path"):
+                        http_info = f" [{meta['method']} {meta['path']}]"
+                except Exception:
+                    pass
+            
+            lines.append(f"{name}{http_info} ({kind}) in {file_path} - relevance: {relevance:.2f}")
+        return "\n".join(lines)
 
     def _create_agent(self):
         """Tạo LangChain Agent với các tool là Code Graph và GraphRAG."""
