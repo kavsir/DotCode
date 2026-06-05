@@ -1,122 +1,18 @@
 """
-Intent Agent - Sử dụng embedding đa ngữ để phân loại ý định người dùng.
-Không phụ thuộc regex cứng, hoạt động với mọi ngôn ngữ.
+Intent Agent - Sử dụng LLM để phân loại ý định người dùng.
+Linh hoạt với mọi ngôn ngữ, không phụ thuộc regex cứng.
 """
 
 import os
 import re
-from typing import Optional, Tuple
+from typing import Tuple
 
-import numpy as np
 import requests
-from huggingface_hub import login
-from sentence_transformers import SentenceTransformer
 
 
 class IntentAgent:
-    def __init__(self, model_name: str = "BAAI/bge-m3"):
+    def __init__(self, model_name: str = "deepseek-chat"):
         self.model_name = model_name
-        hf_token = os.getenv("HF_TOKEN")
-
-        # Đăng nhập Hugging Face trước khi tạo model
-        if hf_token:
-            try:
-                login(token=hf_token, add_to_git_credential=False)
-            except Exception:
-                pass
-
-        # Tạo model
-        self._model = SentenceTransformer(self.model_name, token=hf_token, trust_remote_code=True)
-        self._prototypes = {
-            "question": [
-                "hàm này làm gì",
-                "giải thích chức năng của function",
-                "class này có tác dụng gì",
-                "tại sao lại dùng cách này",
-                "làm sao để sử dụng",
-                "có bao nhiêu method",
-                "cho tôi biết về",
-                "what does this function do",
-                "explain how this works",
-                "tell me about this class",
-                "how many functions are there",
-                "what is the purpose of",
-                "describe the logic of",
-                "cách hoạt động của",
-                "mô tả chức năng của",
-                "hàm X làm gì",
-            ],
-            "search": [
-                "tìm hàm",
-                "tìm tất cả các class",
-                "search for function",
-                "find all references",
-                "where is this defined",
-                "liệt kê tất cả",
-                "list all functions",
-                "show me the definition",
-                "tìm kiếm trong codebase",
-                "find occurrences of",
-                "locate the implementation",
-                "tìm những file liên quan",
-            ],
-            "command": [
-                "thêm docstring cho class",
-                "đổi tên hàm",
-                "tạo file mới",
-                "sửa lỗi",
-                "tối ưu code",
-                "refactor this function",
-                "add a new method",
-                "delete the file",
-                "update the implementation",
-                "viết unit test cho",
-                "cập nhật logic xử lý",
-                "thay đổi kiểu dữ liệu",
-                "merge two functions",
-            ],
-            "ambiguous": [
-                "book",
-                "lend",
-                "sửa",
-                "xóa",
-                "file",
-                "code",
-                "hàm",
-                "class",
-            ],
-        }
-
-        self._prototype_embeddings = None
-
-    @property
-    def model(self):
-        if self._model is None:
-            self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
-        return self._model
-
-    def _ensure_prototypes(self):
-        """Tạo embedding cho tất cả prototype nếu chưa có."""
-        if self._prototype_embeddings is not None:
-            return
-
-        self._prototype_embeddings = {}
-        for intent, examples in self._prototypes.items():
-            embeddings = self.model.encode(examples, normalize_embeddings=True)
-            self._prototype_embeddings[intent] = embeddings
-
-    def _semantic_similarity(self, text: str, intent: str) -> float:
-        """Tính độ tương đồng ngữ nghĩa giữa text và prototype của intent."""
-        self._ensure_prototypes()
-
-        # Encode input
-        input_emb = self.model.encode([text], normalize_embeddings=True)[0]
-
-        # Tính cosine similarity với tất cả prototype của intent
-        prototypes = self._prototype_embeddings[intent]
-        similarities = np.dot(prototypes, input_emb)  # Đã normalize nên dot = cosine
-
-        return float(similarities.max())
 
     def is_ambiguous(self, text: str) -> bool:
         """Phát hiện input quá ngắn hoặc không rõ ràng."""
@@ -125,39 +21,14 @@ class IntentAgent:
 
         words = text.strip().split()
 
-        # Input quá ngắn (1-2 từ) và không có từ khóa hỏi → ambiguous
+        # Input cực ngắn (1-2 từ) và không có dấu hiệu câu hỏi → ambiguous
         if len(words) <= 2:
             question_indicators = [
-                "?",
-                "ai",
-                "gì",
-                "nào",
-                "sao",
-                "đâu",
-                "làm sao",
-                "tại sao",
-                "what",
-                "how",
-                "why",
-                "where",
-                "when",
-                "which",
-                "who",
-                "tìm",
-                "kiếm",
-                "search",
-                "find",
-                "list",
-                "show",
-                "liệt kê",
-                "thêm",
-                "add",
-                "tạo",
-                "create",
-                "sửa",
-                "fix",
-                "đổi",
-                "xóa",
+                "?", "ai", "gì", "nào", "sao", "đâu",
+                "what", "how", "why", "where", "when", "which", "who",
+                "tìm", "search", "find", "list", "show",
+                "thêm", "add", "tạo", "create", "sửa", "fix", "xóa",
+                "có", "is", "are", "does", "do", "can",
             ]
             text_lower = text.lower()
             has_indicator = any(indicator in text_lower for indicator in question_indicators)
@@ -167,11 +38,9 @@ class IntentAgent:
 
         return False
 
-    def classify(
-        self, text: str, use_embedding: bool = True, use_llm: bool = True
-    ) -> Tuple[str, float]:
+    def classify(self, text: str) -> Tuple[str, float]:
         """
-        Phân loại intent dùng embedding + LLM + rule-based.
+        Phân loại intent dùng LLM (chính) + rule-based fallback.
 
         Returns:
             Tuple[str, float]: (intent, confidence)
@@ -183,84 +52,40 @@ class IntentAgent:
         if self.is_ambiguous(text):
             return "ambiguous", 1.0
 
-        # Tầng 1: Embedding similarity (nhanh, rẻ)
-        if use_embedding:
-            try:
-                scores = {}
-                for intent in self._prototypes:
-                    scores[intent] = self._semantic_similarity(text, intent)
+        # Gọi LLM để phân loại
+        llm_intent, llm_confidence = self._llm_classify(text)
+        if llm_intent != "unknown" and llm_confidence > 0.5:
+            return llm_intent, llm_confidence
 
-                best_intent = max(scores, key=scores.get)
-                best_score = scores[best_intent]
-
-                if best_score > 0.7:
-                    return best_intent, best_score
-
-                # Nếu embedding không tự tin và input ngắn → ambiguous
-                if best_score < 0.65 and len(text.strip().split()) <= 3:
-                    return "ambiguous", 0.5
-
-                # Nếu embedding khá tự tin → trả về
-                if best_score > 0.5:
-                    return best_intent, best_score
-            except Exception:
-                pass
-
-        # Tầng 2: LLM classification (chính xác, linh hoạt)
-        if use_llm:
-            llm_intent, llm_confidence = self._llm_classify(text)
-            if llm_intent != "unknown" and llm_confidence > 0.5:
-                return llm_intent, llm_confidence
-
-        # Tầng 3: Rule-based fallback
+        # Fallback về rule-based nếu LLM không khả dụng
         return self._rule_based_fallback(text)
 
-    def _rule_based_fallback(self, text: str) -> Tuple[str, float]:
-        """Fallback regex khi embedding không khả dụng."""
-        text_lower = text.lower().strip()
-
-        # Pattern rõ ràng cho search
-        if re.match(r"^\s*(tìm|search|find|liệt\s+kê|list|show)\s", text_lower):
-            return "search", 0.8
-
-        # Pattern rõ ràng cho command
-        if re.match(
-            r"^\s*(thêm|add|tạo|create|sửa|fix|đổi|rename|delete|xóa|update)\s", text_lower
-        ):
-            return "command", 0.8
-
-        # Pattern cho question
-        if text.rstrip().endswith("?") or re.match(
-            r"^(làm sao|tại sao|giải thích|how|why|what|explain)", text_lower
-        ):
-            return "question", 0.7
-
-        # Mặc định: command (giữ nguyên hành vi Aider)
-        return "command", 0.5
-
     def _llm_classify(self, text: str) -> Tuple[str, float]:
-        """Dùng LLM để phân loại intent khi embedding không tự tin."""
+        """Dùng LLM để phân loại intent."""
         api_key = os.getenv("DEEPSEEK_API_KEY")
         if not api_key:
             return "unknown", 0.0
 
-        prompt = f"""Classify the user input into one of these intents:
-    - question: asking about code (what, why, how, explain, describe...)
-    - search: searching for code (find, locate, list, search, where...)
-    - command: requesting a code change (add, fix, create, refactor, update...)
-    - architecture: asking about project structure (modules, architecture, overview, components...)
-    - ambiguous: too short or unclear to classify
+        prompt = f"""Classify the user input into exactly one of these intents:
+- question: asking about code (what, why, how, explain, describe...)
+- search: searching for code (find, locate, list, search, where...)
+- command: requesting a code change (add, fix, create, refactor, update...)
+- architecture: asking about project structure (modules, architecture, overview, components...)
+- ambiguous: too short or unclear to classify
 
-    User input: "{text}"
+User input: "{text}"
 
-    Respond with exactly one word (question, search, command, architecture, ambiguous)."""
+Respond with exactly one word (question, search, command, architecture, ambiguous)."""
 
         try:
             response = requests.post(
                 "https://api.deepseek.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
-                    "model": "deepseek-chat",
+                    "model": self.model_name,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,
                     "temperature": 0.0,
@@ -278,3 +103,56 @@ class IntentAgent:
             pass
 
         return "unknown", 0.0
+
+    def _rule_based_fallback(self, text: str) -> Tuple[str, float]:
+        """Fallback regex khi LLM không khả dụng."""
+        text_lower = text.lower().strip()
+
+        # Pattern rõ ràng cho search
+        if re.match(r"^\s*(tìm|search|find|liệt\s+kê|list|show|tìm\s+kiếm)\s", text_lower):
+            return "search", 0.8
+
+        # Pattern rõ ràng cho command
+        if re.match(
+            r"^\s*(thêm|add|tạo|create|sửa|fix|đổi|rename|delete|xóa|update|cập\s+nhật)\s",
+            text_lower,
+        ):
+            return "command", 0.8
+
+        # Pattern cho câu hỏi kiến trúc
+        if re.match(r"^\s*có\s+(những|bao\s+nhiêu)\s+(module|phần|thành\s+phần|file|class|function)", text_lower):
+            return "question", 0.8
+
+        # Pattern cho câu hỏi "X có liên quan đến Y không?"
+        if re.search(r"có\s+liên\s+quan\s+(đến|tới|với)", text_lower):
+            return "search", 0.8
+
+        # Pattern cho câu hỏi
+        if text.rstrip().endswith("?") or re.match(
+            r"^(làm sao|tại sao|giải thích|how|why|what|explain|hàm\s+\w+\s+làm\s+gì|class\s+\w+\s+có\s+tác\s+dụng|cho\s+tôi\s+biết)",
+            text_lower,
+        ):
+            return "question", 0.7
+
+        # Pattern cho câu hỏi "hàm X làm gì?" hoặc "function X làm gì?"
+        if re.search(
+            r"(hàm|function|method|class)\s+\w+\s+(làm\s+gì|có\s+tác\s+dụng\s+gì|dùng\s+để\s+làm\s+gì)",
+            text_lower,
+        ):
+            return "question", 0.8
+
+        # Pattern cho câu hỏi mở về dự án (bắt đầu bằng "có những", "liệt kê")
+        if re.match(r"^\s*(có\s+những|liệt\s+kê|kể\s+tên|cho\s+biết|nêu\s+ra)", text_lower):
+            return "question", 0.8
+
+        # Mặc định: nếu input dài hơn 5 từ → question
+        if len(text.strip().split()) > 5:
+            return "question", 0.5
+        
+        if re.search(
+                r"(luồng|xử\s+lý|quy\s+trình|flow|process|cách\s+thức|how\s+does|how\s+do)",
+                text_lower,
+            ):
+                return "question", 0.8
+
+        return "command", 0.5

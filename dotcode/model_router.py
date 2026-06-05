@@ -117,11 +117,14 @@ class SafeModelRouter(ModelRouter):
         return True
 
     def get_safe_model(self, message: str, intent: str, context_tokens: int = 0) -> str:
+        if intent in ("question", "search") and context_tokens < 10000:
+            return self.model_map[TaskComplexity.SIMPLE]  
+        
         if self.should_switch_model(intent, context_tokens):
             complexity = self.classify_task(message, context_tokens)
             selected = self.model_map[complexity]
         else:
             selected = self.model_map[TaskComplexity.COMPLEX]
-
+        
         self.current_model = selected
         return selected
