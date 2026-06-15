@@ -16,6 +16,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime
 
+from dotcode.dst import DialogueStateTracker, DialogueState
 from dotcode.agents.intent_agent import IntentAgent
 from dotcode.code_rag import CodeRAG
 from dotcode.graph.__init__ import CodeGraph
@@ -501,16 +502,14 @@ class Coder:
         max_inp_tokens = self.main_model.info.get("max_input_tokens") or 0
 
         has_map_prompt = hasattr(self, "gpt_prompts") and self.gpt_prompts.repo_content_prefix
-        # DotCode: Khởi tạo Intent Agent
         self.intent_agent = IntentAgent()
         self.code_graph = None
         self.code_rag = code_rag
         self.model_router = SafeModelRouter()
         # self.io.tool_output("🔍 [DEBUG] model_router initialized")  # debug tạm thời
-        # DotCode: LangChain CodeRAG (lazy init)
-        # DotCode: Khởi tạo HITL Manager
         self.hitl_manager = HITLManager()
-
+        self.dst = DialogueStateTracker()
+        
         # DotCode: Khởi tạo Code Graph Engine
         # DotCode: Khởi tạo Code Graph Engine
         self.code_graph = None
@@ -970,6 +969,38 @@ class Coder:
         else:
             message = user_message
 
+        # DotCode: Kiểm tra message None (slash command có thể trả về None)
+        if message is None:
+            return
+
+        # ===== DotCode: Dialogue State Tracking =====
+        if hasattr(self, "dst") and self.dst.state.has_pending_question:
+            # Kiểm tra intent shift
+            if self.dst.is_intent_shift(message):
+                self.dst.clear_state()
+            else:
+                resolved = self.dst.resolve_intent(message)
+
+                if resolved["resolved_intent"] == "contextual_yes":
+                    self._handle_contextual_yes(self.dst.state)
+                    self.dst.clear_state()
+                    return
+
+                elif resolved["resolved_intent"] == "contextual_no":
+                    self.io.tool_output("❌ Đã hủy yêu cầu.")
+                    self.dst.clear_state()
+                    return
+
+                elif resolved["resolved_intent"] == "command" and resolved.get("enriched_message"):
+                    message = resolved["enriched_message"]
+
+                elif self.dst.needs_clarification(resolved.get("confidence", 0.0)):
+                    self.io.tool_output(
+                        "🤔 Bạn có thể chọn rõ hơn không? " + str(self.dst.state.options)
+                    )
+                    return
+        # ===== Kết thúc DST =====
+
         # DotCode: Phát hiện câu hỏi kiến trúc trước khi phân loại intent
         architecture_keywords = [
             "module chính", "cấu trúc dự án", "kiến trúc", "tổng quan",
@@ -984,7 +1015,6 @@ class Coder:
 
         # DotCode: Sử dụng Intent Agent để phân loại
         intent, confidence = self.intent_agent.classify(message)
-        # self.io.tool_output(f"🔍 [DEBUG] intent={intent}, confidence={confidence:.2f}")
 
         if intent == "ambiguous":
             self.io.tool_output(
@@ -1016,7 +1046,7 @@ class Coder:
 
         # intent == "command": tự động thêm file liên quan rồi vào luồng Aider
         self._auto_add_context(message, max_files=3)
-        
+
         while message:
             self.reflected_message = None
             list(self.send_message(message))
@@ -1029,7 +1059,7 @@ class Coder:
                 return
 
             self.num_reflections += 1
-            message = self.reflected_message
+        message = self.reflected_message
 
     def _auto_add_context(self, message: str, max_files: int = 5) -> set:
         """Tự động thêm file liên quan vào chat dựa trên câu hỏi."""
@@ -1853,7 +1883,6 @@ class Coder:
         return True
 
     def send_message(self, inp):
-        # self.io.tool_output("🔍 [DEBUG] send_message called")
         self.event("message_send_starting")
 
         # Notify IO that LLM processing is starting
@@ -1879,9 +1908,6 @@ class Coder:
                 intent = "search"
 
             selected_model_name = self.model_router.get_safe_model(inp, intent, context_tokens)
-
-            # Debug
-            # self.io.tool_output(f"🔍 [DEBUG] intent={intent}, tokens={context_tokens}, selected={selected_model_name}, current={self.main_model.name}")
 
             if selected_model_name != self.main_model.name:
                 self.io.tool_output(
@@ -1989,6 +2015,12 @@ class Coder:
             if hasattr(self, "model_router"):
                 self.main_model = saved_model
             # ===== Kết thúc DotCode =====
+
+            # ===== DotCode: DST Update =====
+            if hasattr(self, "dst") and self.partial_response_content:
+                new_state = self.dst.detect_question(self.partial_response_content)
+                self.dst.update_state(new_state)
+            # ===== Kết thúc DST Update =====
 
         ###
         # print()
@@ -3075,3 +3107,20 @@ class Coder:
         finally:
             # Khôi phục system prompt gốc
             self.gpt_prompts.main_system = saved_prompt
+    def _handle_contextual_yes(self, state):
+        """Xử lý khi người dùng xác nhận câu hỏi của AI."""
+        if state.question_type.value == "yes_no":
+            self.io.tool_output("✅ Đã xác nhận. Tiếp tục thực hiện...")
+        elif state.question_type.value == "multi_step":
+            self.io.tool_output("✅ Đã xác nhận kế hoạch. Bắt đầu thực hiện...")
+        elif state.question_type.value == "suggestion":
+            self.io.tool_output("✅ Đã xác nhận. Đang phân tích sâu hơn...")
+            # Gửi lại câu hỏi trước đó với prompt mở rộng
+            if state.question_text:
+                enhanced_message = f"(Người dùng muốn tìm hiểu sâu hơn về chủ đề trước đó) {state.question_text[:200]}"
+                self._handle_question(enhanced_message)
+                return
+        # Mặc định: gửi lại câu hỏi gốc với yêu cầu thực hiện
+        if state.question_text:
+            self.io.tool_output("Đang thực hiện yêu cầu...")
+            # TODO: Gửi lại prompt gốc để AI thực hiện

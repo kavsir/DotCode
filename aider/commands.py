@@ -80,7 +80,6 @@ class Commands:
 
         self.help = None
         self.editor = editor
-
         # Store the original read-only filenames provided via args.read
         self.original_read_only_fnames = set(original_read_only_fnames or [])
 
@@ -1685,8 +1684,477 @@ Just show me the edits I need to make.
             )
         except Exception as e:
             self.io.tool_error(f"An unexpected error occurred while copying to clipboard: {str(e)}")
+    
+    def cmd_codebase(self, args):
+        """Tạo báo cáo HTML tổng quan về codebase với đồ thị và phân tích chi tiết."""
+        import os
+        import json
+        import webbrowser
+        from html import escape
+        from datetime import datetime
 
+        if not hasattr(self.coder, 'code_graph') or not self.coder.code_graph:
+            self.io.tool_output("❌ Code Graph Engine is not available for this project.")
+            return
 
+        cg = self.coder.code_graph
+        if not cg.is_indexed():
+            cg.index()
+
+        raw_db = cg.db._db if hasattr(cg.db, '_db') else cg.db
+
+        # ===== 1. THU THẬP DỮ LIỆU =====
+        symbols = [dict(s) for s in raw_db.conn.execute("""
+            SELECT * FROM symbols
+            WHERE file_path NOT LIKE '%node_modules%'
+            AND file_path NOT LIKE '%/.venv/%'
+            AND file_path NOT LIKE '%/site-packages/%'
+            AND file_path NOT LIKE '%.dotcode/%'
+            AND file_path NOT LIKE '%aider/website/%'
+            AND file_path NOT LIKE '%aider/_posts/%'
+            AND file_path NOT LIKE '%.min.js%'
+            AND kind IN ('class', 'function', 'method')
+            ORDER BY pagerank DESC
+            LIMIT 500
+        """).fetchall()]
+
+        symbol_ids = {s["id"] for s in symbols}
+
+        # Tạo node FILE
+        file_set = {}
+        for sym in symbols:
+            fp = sym.get("file_path", "")
+            if fp not in file_set:
+                file_set[fp] = {
+                    "id": f"FILE::{fp.replace('/', '_').replace('\\', '_')}",
+                    "label": os.path.basename(fp),
+                    "kind": "file",
+                    "title": f"FILE: {fp}",
+                    "pagerank": 0.0,
+                }
+        file_nodes = list(file_set.values())
+
+        # Tạo module nodes
+        module_nodes = []
+        if cg.graphrag and cg.graphrag.communities:
+            for cid, cdata in cg.graphrag.communities.items():
+                summary = cdata.get("summary", "")
+                if summary:
+                    short_label = summary[:50].split(".")[0] if summary else f"Module {cid}"
+                    module_nodes.append({
+                        "id": f"MODULE::{cid}",
+                        "label": short_label,
+                        "kind": "module",
+                        "title": f"MODULE {cid}: {escape(summary[:200])}",
+                        "pagerank": 0.5,
+                    })
+
+        total_symbols = len(symbols)
+        classes = sum(1 for s in symbols if s.get("kind") == "class")
+        functions = sum(1 for s in symbols if s.get("kind") == "function")
+        methods = sum(1 for s in symbols if s.get("kind") == "method")
+
+        languages = set()
+        for s in symbols:
+            fp = s.get("file_path", "")
+            ext = os.path.splitext(fp)[1].lower()
+            if ext in ('.py',): languages.add('Python')
+            elif ext in ('.ts', '.tsx'): languages.add('TypeScript')
+            elif ext in ('.js', '.jsx'): languages.add('JavaScript')
+            elif ext == '.rs': languages.add('Rust')
+            elif ext == '.go': languages.add('Go')
+
+        files = set(s.get("file_path", "") for s in symbols)
+        total_files = len(files)
+
+        # ===== LẤY TẤT CẢ EDGES =====
+        edges = []
+
+        # 1. Quan hệ thật từ DB: calls, contains, imports, references
+        for e in raw_db.conn.execute("""
+            SELECT source_id, target_id, type
+            FROM edges
+            WHERE type IN ('calls', 'contains', 'imports', 'references')
+        """).fetchall():
+            source_id, target_id, edge_type = e[0], e[1], e[2]
+            if source_id in symbol_ids and target_id in symbol_ids:
+                edges.append({"source": source_id, "target": target_id, "type": edge_type})
+
+        # 2. Thêm quan hệ FILE -> symbol
+        for sym in symbols:
+            fp = sym.get("file_path", "")
+            if not fp:
+                continue
+            file_node = file_set.get(fp)
+            if file_node:
+                edges.append({
+                    "source": file_node["id"],
+                    "target": sym["id"],
+                    "type": "file_contains"
+                })
+
+        # 3. Thêm quan hệ MODULE -> symbol
+        if cg.graphrag and cg.graphrag.communities:
+            for cid, cdata in cg.graphrag.communities.items():
+                module_id = f"MODULE::{cid}"
+                for node_id in cdata.get("nodes", []):
+                    if node_id in symbol_ids:
+                        edges.append({
+                            "source": module_id,
+                            "target": node_id,
+                            "type": "module_contains"
+                        })
+
+        total_edges = len(edges)
+
+        # Communities
+        communities_data = []
+        if cg.graphrag and cg.graphrag.communities:
+            for cid, cdata in sorted(cg.graphrag.communities.items()):
+                nodes = cdata.get("nodes", [])
+                summary = cdata.get("summary", "")
+                key_names = []
+                for node_id in nodes[:5]:
+                    sym = cg.db.get_symbol(node_id) if hasattr(cg.db, 'get_symbol') else None
+                    if sym:
+                        name = sym.name if hasattr(sym, 'name') else sym.get('name', '?')
+                        kind = sym.kind.value if hasattr(sym, 'kind') and hasattr(sym.kind, 'value') else sym.get('kind', '?')
+                        key_names.append(f"{kind} {name}")
+                communities_data.append({
+                    "id": cid, "summary": summary, "key_symbols": key_names, "node_count": len(nodes),
+                })
+
+        # ===== 2. GỌI LLM ĐỂ TẠO BÁO CÁO THÔNG MINH =====
+        smart_summary = ""
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if api_key and communities_data:
+            try:
+                comm_text = "\n".join([
+                    f"- Module {c['id']}: {c['summary'][:150]} ({c['node_count']} symbols)"
+                    for c in communities_data[:10]
+                ])
+                user_lang = getattr(self.coder, "chat_language", "en") or "en"
+                lang_name = "Vietnamese" if user_lang.startswith("vi") else "English"
+                prompt = f"""You are a software architecture expert. Create a brief summary of this codebase.
+
+    STATISTICS:
+    - Files: {total_files}
+    - Symbols: {total_symbols} ({functions} functions, {methods} methods, {classes} classes)
+    - Relationships: {total_edges}
+    - Languages: {', '.join(sorted(languages)) if languages else 'Unknown'}
+    - Modules: {len(communities_data)}
+
+    MODULE LIST:
+    {comm_text if comm_text else 'No module data available'}
+
+    Write a summary in {lang_name}, including:
+    1. Project scale and complexity
+    2. Main modules and their functions
+    3. Technologies used
+    4. Architecture observations
+
+    Keep it under 200 words. Return ONLY the summary, no explanations."""
+                import requests as req
+                response = req.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 400, "temperature": 0.3},
+                    timeout=15,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    smart_summary = data["choices"][0]["message"]["content"].strip()
+            except Exception:
+                smart_summary = "Không thể tạo báo cáo thông minh do LLM không khả dụng."
+
+        if not smart_summary:
+            smart_summary = (
+                f"Dự án gồm {total_files} file, {total_symbols} symbol và {total_edges} quan hệ. "
+                f"Hệ thống có {classes} class, {functions} function và {methods} method. "
+                f"Các node có PageRank cao thường là những thành phần quan trọng trong kiến trúc."
+            )
+
+        # ===== 3. MÀU SẮC =====
+        color_map = {
+            "class": {"background": "#e74c3c", "border": "#c0392b", "highlight": {"background": "#ff6b5f", "border": "#ffffff"}},
+            "function": {"background": "#3498db", "border": "#2471a3", "highlight": {"background": "#5dade2", "border": "#ffffff"}},
+            "method": {"background": "#2ecc71", "border": "#1e8449", "highlight": {"background": "#58d68d", "border": "#ffffff"}},
+            "file": {"background": "#f39c12", "border": "#d68910", "highlight": {"background": "#f7dc6f", "border": "#ffffff"}},
+            "module": {"background": "#9b59b6", "border": "#7d3c98", "highlight": {"background": "#af7ac5", "border": "#ffffff"}},
+        }
+        simple_color_map = {"class": "#e74c3c", "function": "#3498db", "method": "#2ecc71", "file": "#f39c12", "module": "#9b59b6"}
+        shape_map = {"class": "dot", "function": "ellipse", "method": "box", "file": "square", "module": "diamond"}
+        edge_color_map = {
+            "calls": "#2f80ed",
+            "contains": "#8e44ad",
+            "imports": "#e67e22",
+            "references": "#1abc9c",
+            "file_contains": "#f39c12",
+            "module_contains": "#9b59b6"
+        }
+
+        # ===== 4. CHUẨN BỊ DATA CHO ĐỒ THỊ =====
+        nodes_json = []
+        for sym in symbols:
+            kind = sym.get("kind", "function")
+            pagerank = sym.get("pagerank", 0) or 0
+            name = sym.get("name", "")
+            file_path = sym.get("file_path", "")
+            line = sym.get("start_line", 0)
+            nodes_json.append({
+                "id": sym["id"],
+                "label": name,
+                "color": color_map.get(kind, {"background": "#95a5a6", "border": "#7f8c8d", "highlight": {"background": "#bdc3c7", "border": "#ffffff"}}),
+                "shape": shape_map.get(kind, "ellipse"),
+                "title": f"{kind.upper()}: {name}\nFile: {file_path}\nLine: {line}\nPageRank: {pagerank:.4f}",
+                "size": max(12, min(45, pagerank * 250 + 12)),
+                "kind": kind, "file": file_path, "pagerank": pagerank,
+                "font": {"color": "#ffffff", "size": 14},
+            })
+
+        for fn in file_nodes:
+            nodes_json.append({
+                "id": fn["id"], "label": fn["label"],
+                "color": color_map.get("file", {"background": "#f39c12", "border": "#d68910", "highlight": {"background": "#f7dc6f", "border": "#ffffff"}}),
+                "shape": "square", "title": fn["title"],
+                "size": 20, "kind": "file", "file": "", "pagerank": 0.5,
+                "font": {"color": "#ffffff", "size": 14},
+            })
+
+        for mn in module_nodes:
+            nodes_json.append({
+                "id": mn["id"], "label": mn["label"],
+                "color": color_map.get("module", {"background": "#9b59b6", "border": "#7d3c98", "highlight": {"background": "#af7ac5", "border": "#ffffff"}}),
+                "shape": "diamond", "title": mn["title"],
+                "size": 25, "kind": "module", "file": "", "pagerank": 0.8,
+                "font": {"color": "#ffffff", "size": 14},
+            })
+
+        edges_json = []
+        for e in edges:
+            edges_json.append({"source": e["source"], "target": e["target"], "type": e["type"]})
+
+        # ===== 5. HÀM RENDER DANH SÁCH =====
+        def render_symbol_list(title, items, color, limit=12):
+            if not items: return f"<h3>{title}</h3><div class='summary-box'>Không có dữ liệu.</div>"
+            html_items = ""
+            for s in items[:limit]:
+                name = escape(str(s.get("name", "")))
+                kind = escape(str(s.get("kind", "")))
+                pagerank = s.get("pagerank", 0) or 0
+                file_path = escape(str(s.get("file_path", "")))
+                html_items += f"""
+                <div class="sym" title="{file_path}">
+                    <span class="dot" style="background:{color}"></span>
+                    <span>{kind} <b>{name}</b></span>
+                    <span style="color:#777;margin-left:auto">{pagerank:.4f}</span>
+                </div>"""
+            return f"<h3>{title}</h3><div class='top-symbols'>{html_items}</div>"
+
+        def render_communities(items, limit=10):
+            if not items: return "<div class='summary-box'>Không có dữ liệu module.</div>"
+            html_items = ""
+            for c in items[:limit]:
+                cid = escape(str(c.get("id", "")))
+                summary = escape(str(c.get("summary", "")))[:180]
+                key_symbols = escape(", ".join(c.get("key_symbols", [])[:5]))
+                node_count = c.get("node_count", 0)
+                html_items += f"""
+                <div class="community-card">
+                    <h4>Module {cid}</h4><p>{summary}...</p>
+                    <div class="keys">Nodes: {node_count}</div>
+                    <div class="keys">🔑 {key_symbols}</div>
+                </div>"""
+            return html_items
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # ===== 6. TẠO HTML =====
+        html = f"""<!DOCTYPE html>
+    <html lang="vi">
+    <head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DotCode - Codebase Report</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet">
+    <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{ font-family: 'Segoe UI', sans-serif; background: #0f0f23; color: #e0e0e0; overflow: hidden; }}
+    .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 20px; border-bottom: 3px solid #e74c3c; }}
+    .header h1 {{ font-size: 2em; color: #e74c3c; }} .header p {{ color: #a0a0a0; margin-top: 5px; }}
+    .container {{ display: flex; height: calc(100vh - 100px); }}
+    .sidebar {{ width: 320px; background: #1a1a2e; overflow-y: auto; padding: 15px; border-right: 1px solid #2a2a4e; }}
+    .sidebar h3 {{ color: #e74c3c; margin-top: 16px; margin-bottom: 10px; font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; }}
+    .stat {{ display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a4e; font-size: 0.85em; }}
+    .stat .label {{ color: #a0a0a0; }} .stat .value {{ color: white; font-weight: bold; }}
+    .summary-box {{ background: #16213e; border-radius: 8px; padding: 12px; margin: 10px 0; font-size: 0.8em; line-height: 1.5; color: #c0c0c0; }}
+    .community-card {{ background: #16213e; border-radius: 8px; padding: 12px; margin: 10px 0; border-left: 3px solid #e74c3c; }}
+    .community-card h4 {{ color: #e74c3c; font-size: 0.9em; margin-bottom: 5px; }}
+    .community-card p {{ font-size: 0.75em; color: #a0a0a0; line-height: 1.4; }}
+    .community-card .keys {{ font-size: 0.7em; color: #58a6ff; margin-top: 5px; }}
+    .top-symbols {{ margin-top: 8px; }}
+    .top-symbols .sym {{ display: flex; align-items: center; gap: 6px; padding: 5px 0; font-size: 0.75em; border-bottom: 1px solid rgba(255,255,255,0.04); }}
+    .top-symbols .dot {{ width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }}
+    #graph {{ flex: 1; background: #0f0f23; }}
+    .btn {{ display: inline-block; padding: 7px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.75em; margin-right: 5px; color: white; font-weight: bold; }}
+    .btn-green {{ background: #2ecc71; }} .btn-red {{ background: #e74c3c; }} .btn-blue {{ background: #3498db; }} .btn-orange {{ background: #f39c12; }} .btn-purple {{ background: #9b59b6; }}
+    .legend {{ display: flex; gap: 10px; font-size: 0.72em; margin-top: 8px; flex-wrap: wrap; }}
+    .legend-item {{ display: flex; align-items: center; gap: 4px; }} .legend-dot {{ width: 10px; height: 10px; border-radius: 50%; }}
+    .controls {{ margin-top: 15px; }}
+    </style>
+    </head>
+    <body>
+    <div class="header">
+    <h1>📊 DotCode Codebase Report</h1>
+    <p>Generated on {now_str} · {total_files} files · {total_symbols} symbols · {total_edges} relationships</p>
+    </div>
+    <div class="container">
+    <div class="sidebar">
+        <h3>📋 Tổng quan thông minh</h3>
+        <div class="summary-box">{escape(smart_summary).replace(chr(10), "<br>")}</div>
+        <h3>📊 Thống kê</h3>
+        <div class="stat"><span class="label">Files</span><span class="value">{total_files}</span></div>
+        <div class="stat"><span class="label">Symbols</span><span class="value">{total_symbols}</span></div>
+        <div class="stat"><span class="label">Classes</span><span class="value">{classes}</span></div>
+        <div class="stat"><span class="label">Functions</span><span class="value">{functions}</span></div>
+        <div class="stat"><span class="label">Methods</span><span class="value">{methods}</span></div>
+        <div class="stat"><span class="label">Relationships</span><span class="value">{total_edges}</span></div>
+        <div class="stat"><span class="label">Languages</span><span class="value">{', '.join(sorted(languages)) if languages else 'Unknown'}</span></div>
+        <div class="stat"><span class="label">Modules</span><span class="value">{len(communities_data)}</span></div>
+        <div class="controls">
+        <button class="btn btn-green" id="methodBtn" onclick="toggleKind('method')">Ẩn methods</button>
+        <button class="btn btn-red" id="functionBtn" onclick="toggleKind('function')">Ẩn functions</button>
+        <button class="btn btn-orange" id="fileBtn" onclick="toggleKind('file')">Ẩn files</button>
+        <button class="btn btn-purple" id="moduleBtn" onclick="toggleKind('module')" {'style="display:none"' if not module_nodes else ""}>Ẩn modules</button>
+        <button class="btn btn-blue" onclick="resetView()">Reset view</button>
+        </div>
+        <div class="controls">
+        <button class="btn btn-blue" id="callsEdgeBtn" onclick="toggleEdgeType('calls')">Ẩn calls</button>
+        <button class="btn btn-purple" id="containsEdgeBtn" onclick="toggleEdgeType('contains')">Ẩn contains</button>
+        <button class="btn btn-orange" id="importsEdgeBtn" onclick="toggleEdgeType('imports')">Ẩn imports</button>
+        <button class="btn btn-green" id="refsEdgeBtn" onclick="toggleEdgeType('references')">Ẩn references</button>
+        <button class="btn btn-orange" id="fileEdgeBtn" onclick="toggleEdgeType('file_contains')">Hiện file links</button>
+        </div>
+        <div class="legend">
+        <div class="legend-item"><span class="legend-dot" style="background:#e74c3c"></span> Class</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#3498db"></span> Function</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#2ecc71"></span> Method</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#f39c12"></span> File</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#9b59b6"></span> Module</div>
+        </div>
+        <h3>🧩 Modules</h3>
+        {render_communities(communities_data)}
+        {render_symbol_list("🔴 Top Classes", sorted([s for s in symbols if s.get("kind") == "class"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["class"])}
+        {render_symbol_list("🔵 Top Functions", sorted([s for s in symbols if s.get("kind") == "function"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["function"])}
+        {render_symbol_list("🟢 Top Methods", sorted([s for s in symbols if s.get("kind") == "method"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["method"])}
+    </div>
+    <div id="graph"></div>
+    </div>
+    <script>
+    const nodesData = {json.dumps(nodes_json, ensure_ascii=False)};
+    const edgesData = {json.dumps(edges_json, ensure_ascii=False)};
+    const edgeColorMap = {json.dumps(edge_color_map)};
+
+    const nodes = new vis.DataSet(nodesData);
+    const edges = new vis.DataSet(edgesData.map(e => ({{
+        from: e.source,
+        to: e.target,
+        color: {{
+            color: edgeColorMap[e.type] || "#555",
+            highlight: "#ffffff"
+        }},
+        arrows: {{
+            to: {{
+                enabled: true,
+                scaleFactor: 0.5
+            }}
+        }},
+
+        // Không hiện chữ trực tiếp trên cạnh để đỡ rối
+        label: "",
+
+        // Khi rê chuột vào cạnh mới hiện loại quan hệ
+        title: e.type,
+
+        font: {{
+            size: 8,
+            color: "#aaaaaa",
+            strokeWidth: 0
+        }},
+
+        dashes: e.type === "file_contains" || e.type === "module_contains",
+
+        width:
+            e.type === "calls" ? 2 :
+            e.type === "contains" ? 1.5 :
+            e.type === "imports" ? 1 :
+            e.type === "references" ? 1 :
+            e.type === "file_contains" ? 0.6 :
+            e.type === "module_contains" ? 0.6 :
+            1,
+
+        hidden: e.type === "file_contains",
+
+        type: e.type
+    }})));
+
+    const container = document.getElementById("graph");
+    const network = new vis.Network(container, {{ nodes, edges }}, {{
+    nodes: {{ borderWidth: 2, shadow: true, font: {{ color: "#ffffff", size: 14, face: "Segoe UI" }} }},
+    edges: {{ smooth: {{ type: "dynamic" }} }},
+    physics: {{
+        solver: "forceAtlas2Based",
+        forceAtlas2Based: {{ gravitationalConstant: -80, springLength: 120, springConstant: 0.02, damping: 0.95, avoidOverlap: 1 }},
+        stabilization: {{ iterations: 300, updateInterval: 10 }},
+    }},
+    layout: {{ improvedLayout: true }},
+    interaction: {{ hover: true, tooltipDelay: 120, navigationButtons: true, keyboard: true }}
+    }});
+
+    network.once("stabilizationIterationsDone", function() {{ network.setOptions({{ physics: false }}); }});
+    let dragTimer;
+    network.on("dragStart", function() {{ network.setOptions({{ physics: true }}); clearTimeout(dragTimer); }});
+    network.on("dragEnd", function() {{ dragTimer = setTimeout(function() {{ network.setOptions({{ physics: false }}); }}, 2000); }});
+
+    const hiddenState = {{}};
+    function toggleKind(kind) {{
+        hiddenState[kind] = !hiddenState[kind];
+        const allNodes = network.body.data.nodes.get();
+        const updates = allNodes.filter(n => n.kind === kind).map(n => ({{ id: n.id, hidden: hiddenState[kind] }}));
+        network.body.data.nodes.update(updates);
+        const btnMap = {{ method: 'methodBtn', function: 'functionBtn', file: 'fileBtn', module: 'moduleBtn' }};
+        const labels = {{ method: 'methods', function: 'functions', file: 'files', module: 'modules' }};
+        const btn = document.getElementById(btnMap[kind]);
+        if (btn) btn.textContent = hiddenState[kind] ? 'Hiện ' + labels[kind] : 'Ẩn ' + labels[kind];
+    }}
+
+    const hiddenEdgeState = {{}};
+    function toggleEdgeType(type) {{
+        hiddenEdgeState[type] = !hiddenEdgeState[type];
+        const allEdges = network.body.data.edges.get();
+        const updates = allEdges.filter(e => e.type === type).map(e => ({{ id: e.id, hidden: hiddenEdgeState[type] }}));
+        network.body.data.edges.update(updates);
+        const btnMap = {{ calls: "callsEdgeBtn", contains: "containsEdgeBtn", imports: "importsEdgeBtn", references: "refsEdgeBtn", file_contains: "fileEdgeBtn" }};
+        const labelMap = {{ calls: "calls", contains: "contains", imports: "imports", references: "references", file_contains: "file links" }};
+        const btn = document.getElementById(btnMap[type]);
+        if (btn) btn.textContent = hiddenEdgeState[type] ? "Hiện " + labelMap[type] : "Ẩn " + labelMap[type];
+    }}
+
+    function resetView() {{ network.fit({{ animation: {{ duration: 800, easingFunction: "easeInOutQuad" }} }}); }}
+    </script>
+    </body>
+    </html>"""
+
+        # ===== 7. LƯU VÀ MỞ FILE HTML =====
+        output_dir = os.path.join(cg.root, ".dotcode")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "codebase_report.html")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        webbrowser.open("file://" + os.path.abspath(output_path))
+        self.io.tool_output(f"✅ Đã tạo báo cáo: {output_path}")
+        self.io.tool_output(f"📊 Symbols: {total_symbols}, Classes: {classes}, Functions: {functions}, Methods: {methods}, Files: {len(file_nodes)}, Modules: {len(module_nodes)}, Edges: {total_edges}")
 def expand_subdir(file_path):
     if file_path.is_file():
         yield file_path

@@ -1,6 +1,7 @@
 # dotcode/graph/indexer.py
 import hashlib
 import os
+import re
 from pathlib import Path
 from platform import node
 
@@ -271,14 +272,14 @@ class Indexer:
 
     def _extract_symbols(self, root_node, file_path: str, language: str = "python"):
         symbols = []
-        print(f"DEBUG _extract_symbols: language={language}, file_path={file_path[:50]}")
+        #print(f"DEBUG _extract_symbols: language={language}, file_path={file_path[:50]}")
         if language == "python":
-            print("  -> Using _traverse_for_symbols")
+            #print("  -> Using _traverse_for_symbols")
             self._traverse_for_symbols(root_node, file_path, symbols, parent_class=None)
         else:
-            print("  -> Using _traverse_generic")
+            #print("  -> Using _traverse_generic")
             self._traverse_generic(root_node, file_path, symbols, parent_class=None)
-        print(f"  -> Symbols found: {len(symbols)}")
+        #print(f"  -> Symbols found: {len(symbols)}")
         return symbols
     # ========== GENERIC TRAVERSAL (FALLBACK) ==========
     def _traverse_generic(self, node, file_path, symbols=None, parent_class=None):
@@ -606,9 +607,9 @@ class Indexer:
 
     def _traverse_for_symbols(self, node, file_path: str, symbols: list, parent_class=None):
         """Đệ quy tìm function_definition và class_definition (Python)."""
-        if not hasattr(self, '_debug_printed'):
-            self._debug_printed = True
-            print(f"DEBUG root children: {[c.type for c in node.children[:20]]}")
+        #if not hasattr(self, '_debug_printed'):
+            #self._debug_printed = True
+            #print(f"DEBUG root children: {[c.type for c in node.children[:20]]}")
         if node.type == "function_definition":
             name_node = self._get_child(node, "name")
             if name_node:
@@ -619,7 +620,7 @@ class Indexer:
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
                 meta = self._extract_http_metadata(node)
-                print(f"DEBUG metadata for function {name}: {meta}")
+                #print(f"DEBUG metadata for function {name}: {meta}")
                 symbols.append(
                     {
                         "id": sym_id,
@@ -647,7 +648,7 @@ class Indexer:
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
                 meta = self._extract_http_metadata(node)
-                print(f"DEBUG metadata for class {class_name}: {meta}")
+                #print(f"DEBUG metadata for class {class_name}: {meta}")
                 symbols.append(
                     {
                         "id": sym_id,
@@ -670,7 +671,7 @@ class Indexer:
                 return  # Không duyệt tiếp vào class body ở vòng ngoài
             
         elif node.type == "decorated_definition":
-            print(f"  -> Traversing decorated definition, children: {[c.type for c in node.children]}")
+            #print(f"  -> Traversing decorated definition, children: {[c.type for c in node.children]}")
             for child in node.children:
                 self._traverse_for_symbols(child, file_path, symbols, parent_class)
             return
@@ -743,8 +744,7 @@ class Indexer:
 
     def _parse_decorator(self, decorator_text, http_info):
         """Parse một decorator để lấy method và path."""
-        import re
-        print(f"DEBUG _parse_decorator: {decorator_text[:100]}")  # Thêm dòng này
+        #print(f"DEBUG _parse_decorator: {decorator_text[:100]}")  # Thêm dòng này
 
         # FastAPI: @router.post("/books/borrow") hoặc @app.get("/books/search")
         fastapi_match = re.search(
@@ -755,7 +755,7 @@ class Indexer:
             http_info['method'] = fastapi_match.group(1).upper()
             http_info['path'] = fastapi_match.group(2)
             http_info['framework'] = 'FastAPI'
-            print(f"  -> Parsed: {http_info}")  # Thêm dòng này
+            #print(f"  -> Parsed: {http_info}")  # Thêm dòng này
 
         return http_info
 
