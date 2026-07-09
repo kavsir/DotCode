@@ -24,11 +24,37 @@ class IntentAgent:
         # Input cực ngắn (1-2 từ) và không có dấu hiệu câu hỏi → ambiguous
         if len(words) <= 2:
             question_indicators = [
-                "?", "ai", "gì", "nào", "sao", "đâu",
-                "what", "how", "why", "where", "when", "which", "who",
-                "tìm", "search", "find", "list", "show",
-                "thêm", "add", "tạo", "create", "sửa", "fix", "xóa",
-                "có", "is", "are", "does", "do", "can",
+                "?",
+                "ai",
+                "gì",
+                "nào",
+                "sao",
+                "đâu",
+                "what",
+                "how",
+                "why",
+                "where",
+                "when",
+                "which",
+                "who",
+                "tìm",
+                "search",
+                "find",
+                "list",
+                "show",
+                "thêm",
+                "add",
+                "tạo",
+                "create",
+                "sửa",
+                "fix",
+                "xóa",
+                "có",
+                "is",
+                "are",
+                "does",
+                "do",
+                "can",
             ]
             text_lower = text.lower()
             has_indicator = any(indicator in text_lower for indicator in question_indicators)
@@ -120,7 +146,10 @@ Respond with exactly one word (question, search, command, architecture, ambiguou
             return "command", 0.8
 
         # Pattern cho câu hỏi kiến trúc
-        if re.match(r"^\s*có\s+(những|bao\s+nhiêu)\s+(module|phần|thành\s+phần|file|class|function)", text_lower):
+        if re.match(
+            r"^\s*có\s+(những|bao\s+nhiêu)\s+(module|phần|thành\s+phần|file|class|function)",
+            text_lower,
+        ):
             return "question", 0.8
 
         # Pattern cho câu hỏi "X có liên quan đến Y không?"
@@ -129,7 +158,10 @@ Respond with exactly one word (question, search, command, architecture, ambiguou
 
         # Pattern cho câu hỏi
         if text.rstrip().endswith("?") or re.match(
-            r"^(làm sao|tại sao|giải thích|how|why|what|explain|hàm\s+\w+\s+làm\s+gì|class\s+\w+\s+có\s+tác\s+dụng|cho\s+tôi\s+biết)",
+            (
+                r"^(làm sao|tại sao|giải"
+                r" thích|how|why|what|explain|hàm\s+\w+\s+làm\s+gì|class\s+\w+\s+có\s+tác\s+dụng|cho\s+tôi\s+biết)"
+            ),
             text_lower,
         ):
             return "question", 0.7
@@ -148,11 +180,11 @@ Respond with exactly one word (question, search, command, architecture, ambiguou
         # Mặc định: nếu input dài hơn 5 từ → question
         if len(text.strip().split()) > 5:
             return "question", 0.5
-        
+
         if re.search(
-                r"(luồng|xử\s+lý|quy\s+trình|flow|process|cách\s+thức|how\s+does|how\s+do)",
-                text_lower,
-            ):
-                return "question", 0.8
+            r"(luồng|xử\s+lý|quy\s+trình|flow|process|cách\s+thức|how\s+does|how\s+do)",
+            text_lower,
+        ):
+            return "question", 0.8
 
         return "command", 0.5
