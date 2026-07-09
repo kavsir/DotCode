@@ -47,7 +47,7 @@ class CodeRAG:
 
     def _get_fresh_connection(self):
         """Tạo kết nối SQLite mới cho thread hiện tại."""
-        if hasattr(self.code_graph.db, '_db'):
+        if hasattr(self.code_graph.db, "_db"):
             raw_db = self.code_graph.db._db
             conn = sqlite3.connect(raw_db.db_path)
             conn.row_factory = sqlite3.Row
@@ -77,7 +77,10 @@ class CodeRAG:
             for sym in symbols:
                 # Lấy callees
                 cur2 = conn.execute(
-                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE e.source_id = ? AND e.type = 'calls'",
+                    (
+                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.target_id WHERE"
+                        " e.source_id = ? AND e.type = 'calls'"
+                    ),
                     (sym["id"],),
                 )
                 callees = [row[0] for row in cur2.fetchall()]
@@ -85,7 +88,10 @@ class CodeRAG:
 
                 # Lấy callers
                 cur3 = conn.execute(
-                    "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE e.target_id = ? AND e.type = 'calls'",
+                    (
+                        "SELECT s.name FROM symbols s JOIN edges e ON s.id = e.source_id WHERE"
+                        " e.target_id = ? AND e.type = 'calls'"
+                    ),
                     (sym["id"],),
                 )
                 callers = [row[0] for row in cur3.fetchall()]
@@ -96,6 +102,7 @@ class CodeRAG:
                 http_info = ""
                 try:
                     import json
+
                     meta = json.loads(meta_str) if meta_str else {}
                     if meta.get("method") and meta.get("path"):
                         http_info = f" [{meta['method']} {meta['path']}]"
@@ -103,8 +110,8 @@ class CodeRAG:
                     pass
 
                 results.append(
-                    f"{sym['kind']} {sym['name']}{http_info} in {sym['file_path']} (line {sym['start_line']})"
-                    f" -> calls: [{callee_str}], called by: [{caller_str}]"
+                    f"{sym['kind']} {sym['name']}{http_info} in {sym['file_path']} (line"
+                    f" {sym['start_line']}) -> calls: [{callee_str}], called by: [{caller_str}]"
                 )
             return "\n".join(results)
         finally:
@@ -117,24 +124,25 @@ class CodeRAG:
             return "No results found."
         lines = []
         for r in results:
-            name = r.get('name', 'unknown')
-            kind = r.get('kind', 'unknown')
-            file_path = r.get('file_path', '')
-            relevance = r.get('relevance', 0.0)
-            
+            name = r.get("name", "unknown")
+            kind = r.get("kind", "unknown")
+            file_path = r.get("file_path", "")
+            relevance = r.get("relevance", 0.0)
+
             # DotCode: Thêm HTTP metadata nếu có
-            detail = r.get('detail', {})
+            detail = r.get("detail", {})
             http_info = ""
             if detail:
-                meta_str = detail.get('metadata', '{}')
+                meta_str = detail.get("metadata", "{}")
                 try:
                     import json
+
                     meta = json.loads(meta_str) if isinstance(meta_str, str) else meta_str
                     if meta.get("method") and meta.get("path"):
                         http_info = f" [{meta['method']} {meta['path']}]"
                 except Exception:
                     pass
-            
+
             lines.append(f"{name}{http_info} ({kind}) in {file_path} - relevance: {relevance:.2f}")
         return "\n".join(lines)
 
