@@ -2154,7 +2154,13 @@ Just show me the edits I need to make.
 
         webbrowser.open("file://" + os.path.abspath(output_path))
         self.io.tool_output(f"✅ Đã tạo báo cáo: {output_path}")
-        self.io.tool_output(f"📊 Symbols: {total_symbols}, Classes: {classes}, Functions: {functions}, Methods: {methods}, Files: {len(file_nodes)}, Modules: {len(module_nodes)}, Edges: {total_edges}")
+        self.io.tool_output(
+            f"📊 Symbols: {total_symbols}, Classes: {classes}, "
+            f"Functions: {functions}, Methods: {methods}, "
+            f"Files: {len(file_nodes)}, Modules: {len(module_nodes)}, "
+            f"Edges: {total_edges}"
+        )
+        
 def expand_subdir(file_path):
     if file_path.is_file():
         yield file_path
