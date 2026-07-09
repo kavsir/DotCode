@@ -2044,9 +2044,9 @@ Just show me the edits I need to make.
         </div>
         <h3>🧩 Modules</h3>
         {render_communities(communities_data)}
-        {render_symbol_list("🔴 Top Classes", sorted([s for s in symbols if s.get("kind") == "class"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["class"])}
-        {render_symbol_list("🔵 Top Functions", sorted([s for s in symbols if s.get("kind") == "function"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["function"])}
-        {render_symbol_list("🟢 Top Methods", sorted([s for s in symbols if s.get("kind") == "method"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["method"])}
+        {render_symbol_list("🔴 Top Classes", sorted([s for s in symbols if s.get("kind") == "class"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["class"])}
+        {render_symbol_list("🔵 Top Functions", sorted([s for s in symbols if s.get("kind") == "function"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["function"])}
+        {render_symbol_list("🟢 Top Methods", sorted([s for s in symbols if s.get("kind") == "method"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["method"])}
     </div>
     <div id="graph"></div>
     </div>
