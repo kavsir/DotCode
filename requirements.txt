@@ -492,3 +492,4 @@ langchain-openai
 langgraph
 chromadb
 python-igraph
+leidenalg
