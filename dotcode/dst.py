@@ -3,12 +3,13 @@ Dialogue State Tracker cho DotCode.
 Quản lý trạng thái hội thoại để phân giải intent dựa trên ngữ cảnh.
 """
 
-import time
+import hashlib
 import json
 import os
-import hashlib
-from typing import Optional, List, Dict, Any, Tuple
+import time
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 import requests
 from pydantic import BaseModel
 
@@ -23,6 +24,7 @@ class PendingQuestionType(Enum):
 
 class DialogueState(BaseModel):
     """Trạng thái hội thoại hiện tại."""
+
     has_pending_question: bool = False
     question_type: Optional[PendingQuestionType] = None
     question_text: Optional[str] = None
@@ -154,14 +156,35 @@ Chỉ trả JSON, không giải thích."""
         return {"resolved_intent": "delegate_to_intent_agent", "confidence": 0.0}
 
     def _resolve_yes_no(self, user_input: str) -> Dict[str, Any]:
-        confirm_words = ["có", "yes", "ok", "đồng ý", "okay", "y", "ừ", "ừa", "ừm", "làm đi", "bắt đầu đi", "tiếp tục"]
+        confirm_words = [
+            "có",
+            "yes",
+            "ok",
+            "đồng ý",
+            "okay",
+            "y",
+            "ừ",
+            "ừa",
+            "ừm",
+            "làm đi",
+            "bắt đầu đi",
+            "tiếp tục",
+        ]
         deny_words = ["không", "no", "ko", "n", "đừng", "thôi", "chưa", "để sau", "khoan"]
 
         clean_input = user_input.strip().lower()
         if clean_input in confirm_words:
-            return {"resolved_intent": "contextual_yes", "confidence": 0.9, "delta": {"confirmation": "yes"}}
+            return {
+                "resolved_intent": "contextual_yes",
+                "confidence": 0.9,
+                "delta": {"confirmation": "yes"},
+            }
         if clean_input in deny_words:
-            return {"resolved_intent": "contextual_no", "confidence": 0.9, "delta": {"confirmation": "no"}}
+            return {
+                "resolved_intent": "contextual_no",
+                "confidence": 0.9,
+                "delta": {"confirmation": "no"},
+            }
         return {"resolved_intent": "delegate_to_intent_agent", "confidence": 0.0}
 
     def _resolve_choice(self, user_input: str) -> Dict[str, Any]:

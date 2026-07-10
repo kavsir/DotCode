@@ -35,12 +35,13 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Login to DockerHub
-      if: ${{ github.event_name != 'pull_request' }}
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_PASSWORD }}
+    # ❌ BỎ KHỐI NÀY ĐI - không cần login nếu chỉ build test
+    # - name: Login to DockerHub
+    #   if: ${{ github.event_name != 'pull_request' }}
+    #   uses: docker/login-action@v3
+    #   with:
+    #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+    #     password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
     - name: Build Docker images (PR)
       if: ${{ github.event_name == 'pull_request' }}
@@ -52,15 +53,15 @@ jobs:
         push: false
         target: aider
 
-    - name: Build Docker images (Push)
+    - name: Build Docker images (Push) - Test only
       if: ${{ github.event_name != 'pull_request' }}
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./docker/Dockerfile
         platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/aider:dev
+        push: false  # ✅ THAY 'true' THÀNH 'false' - chỉ test build
+        # tags: ${{ secrets.DOCKERHUB_USERNAME }}/aider:dev  # ❌ Bỏ đi
         target: aider
 
     - name: Build Docker full image (PR)
@@ -73,13 +74,13 @@ jobs:
         push: false
         target: aider-full
 
-    - name: Build Docker full image (Push)
+    - name: Build Docker full image (Push) - Test only
       if: ${{ github.event_name != 'pull_request' }}
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./docker/Dockerfile
         platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/aider-full:dev
+        push: false  # ✅ THAY 'true' THÀNH 'false' - chỉ test build
+        # tags: ${{ secrets.DOCKERHUB_USERNAME }}/aider-full:dev  # ❌ Bỏ đi
         target: aider-full

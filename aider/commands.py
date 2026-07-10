@@ -1684,16 +1684,16 @@ Just show me the edits I need to make.
             )
         except Exception as e:
             self.io.tool_error(f"An unexpected error occurred while copying to clipboard: {str(e)}")
-    
+
     def cmd_codebase(self, args):
         """Tạo báo cáo HTML tổng quan về codebase với đồ thị và phân tích chi tiết."""
-        import os
         import json
+        import os
         import webbrowser
-        from html import escape
         from datetime import datetime
+        from html import escape
 
-        if not hasattr(self.coder, 'code_graph') or not self.coder.code_graph:
+        if not hasattr(self.coder, "code_graph") or not self.coder.code_graph:
             self.io.tool_output("❌ Code Graph Engine is not available for this project.")
             return
 
@@ -1701,7 +1701,7 @@ Just show me the edits I need to make.
         if not cg.is_indexed():
             cg.index()
 
-        raw_db = cg.db._db if hasattr(cg.db, '_db') else cg.db
+        raw_db = cg.db._db if hasattr(cg.db, "_db") else cg.db
 
         # ===== 1. THU THẬP DỮ LIỆU =====
         symbols = [dict(s) for s in raw_db.conn.execute("""
@@ -1742,13 +1742,15 @@ Just show me the edits I need to make.
                 summary = cdata.get("summary", "")
                 if summary:
                     short_label = summary[:50].split(".")[0] if summary else f"Module {cid}"
-                    module_nodes.append({
-                        "id": f"MODULE::{cid}",
-                        "label": short_label,
-                        "kind": "module",
-                        "title": f"MODULE {cid}: {escape(summary[:200])}",
-                        "pagerank": 0.5,
-                    })
+                    module_nodes.append(
+                        {
+                            "id": f"MODULE::{cid}",
+                            "label": short_label,
+                            "kind": "module",
+                            "title": f"MODULE {cid}: {escape(summary[:200])}",
+                            "pagerank": 0.5,
+                        }
+                    )
 
         total_symbols = len(symbols)
         classes = sum(1 for s in symbols if s.get("kind") == "class")
@@ -1759,11 +1761,16 @@ Just show me the edits I need to make.
         for s in symbols:
             fp = s.get("file_path", "")
             ext = os.path.splitext(fp)[1].lower()
-            if ext in ('.py',): languages.add('Python')
-            elif ext in ('.ts', '.tsx'): languages.add('TypeScript')
-            elif ext in ('.js', '.jsx'): languages.add('JavaScript')
-            elif ext == '.rs': languages.add('Rust')
-            elif ext == '.go': languages.add('Go')
+            if ext in (".py",):
+                languages.add("Python")
+            elif ext in (".ts", ".tsx"):
+                languages.add("TypeScript")
+            elif ext in (".js", ".jsx"):
+                languages.add("JavaScript")
+            elif ext == ".rs":
+                languages.add("Rust")
+            elif ext == ".go":
+                languages.add("Go")
 
         files = set(s.get("file_path", "") for s in symbols)
         total_files = len(files)
@@ -1788,11 +1795,9 @@ Just show me the edits I need to make.
                 continue
             file_node = file_set.get(fp)
             if file_node:
-                edges.append({
-                    "source": file_node["id"],
-                    "target": sym["id"],
-                    "type": "file_contains"
-                })
+                edges.append(
+                    {"source": file_node["id"], "target": sym["id"], "type": "file_contains"}
+                )
 
         # 3. Thêm quan hệ MODULE -> symbol
         if cg.graphrag and cg.graphrag.communities:
@@ -1800,11 +1805,9 @@ Just show me the edits I need to make.
                 module_id = f"MODULE::{cid}"
                 for node_id in cdata.get("nodes", []):
                     if node_id in symbol_ids:
-                        edges.append({
-                            "source": module_id,
-                            "target": node_id,
-                            "type": "module_contains"
-                        })
+                        edges.append(
+                            {"source": module_id, "target": node_id, "type": "module_contains"}
+                        )
 
         total_edges = len(edges)
 
@@ -1816,24 +1819,35 @@ Just show me the edits I need to make.
                 summary = cdata.get("summary", "")
                 key_names = []
                 for node_id in nodes[:5]:
-                    sym = cg.db.get_symbol(node_id) if hasattr(cg.db, 'get_symbol') else None
+                    sym = cg.db.get_symbol(node_id) if hasattr(cg.db, "get_symbol") else None
                     if sym:
-                        name = sym.name if hasattr(sym, 'name') else sym.get('name', '?')
-                        kind = sym.kind.value if hasattr(sym, 'kind') and hasattr(sym.kind, 'value') else sym.get('kind', '?')
+                        name = sym.name if hasattr(sym, "name") else sym.get("name", "?")
+                        kind = (
+                            sym.kind.value
+                            if hasattr(sym, "kind") and hasattr(sym.kind, "value")
+                            else sym.get("kind", "?")
+                        )
                         key_names.append(f"{kind} {name}")
-                communities_data.append({
-                    "id": cid, "summary": summary, "key_symbols": key_names, "node_count": len(nodes),
-                })
+                communities_data.append(
+                    {
+                        "id": cid,
+                        "summary": summary,
+                        "key_symbols": key_names,
+                        "node_count": len(nodes),
+                    }
+                )
 
         # ===== 2. GỌI LLM ĐỂ TẠO BÁO CÁO THÔNG MINH =====
         smart_summary = ""
         api_key = os.getenv("DEEPSEEK_API_KEY")
         if api_key and communities_data:
             try:
-                comm_text = "\n".join([
-                    f"- Module {c['id']}: {c['summary'][:150]} ({c['node_count']} symbols)"
-                    for c in communities_data[:10]
-                ])
+                comm_text = "\n".join(
+                    [
+                        f"- Module {c['id']}: {c['summary'][:150]} ({c['node_count']} symbols)"
+                        for c in communities_data[:10]
+                    ]
+                )
                 user_lang = getattr(self.coder, "chat_language", "en") or "en"
                 lang_name = "Vietnamese" if user_lang.startswith("vi") else "English"
                 prompt = f"""You are a software architecture expert. Create a brief summary of this codebase.
@@ -1856,10 +1870,19 @@ Just show me the edits I need to make.
 
     Keep it under 200 words. Return ONLY the summary, no explanations."""
                 import requests as req
+
                 response = req.post(
                     "https://api.deepseek.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 400, "temperature": 0.3},
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 400,
+                        "temperature": 0.3,
+                    },
                     timeout=15,
                 )
                 if response.status_code == 200:
@@ -1872,26 +1895,58 @@ Just show me the edits I need to make.
             smart_summary = (
                 f"Dự án gồm {total_files} file, {total_symbols} symbol và {total_edges} quan hệ. "
                 f"Hệ thống có {classes} class, {functions} function và {methods} method. "
-                f"Các node có PageRank cao thường là những thành phần quan trọng trong kiến trúc."
+                "Các node có PageRank cao thường là những thành phần quan trọng trong kiến trúc."
             )
 
         # ===== 3. MÀU SẮC =====
         color_map = {
-            "class": {"background": "#e74c3c", "border": "#c0392b", "highlight": {"background": "#ff6b5f", "border": "#ffffff"}},
-            "function": {"background": "#3498db", "border": "#2471a3", "highlight": {"background": "#5dade2", "border": "#ffffff"}},
-            "method": {"background": "#2ecc71", "border": "#1e8449", "highlight": {"background": "#58d68d", "border": "#ffffff"}},
-            "file": {"background": "#f39c12", "border": "#d68910", "highlight": {"background": "#f7dc6f", "border": "#ffffff"}},
-            "module": {"background": "#9b59b6", "border": "#7d3c98", "highlight": {"background": "#af7ac5", "border": "#ffffff"}},
+            "class": {
+                "background": "#e74c3c",
+                "border": "#c0392b",
+                "highlight": {"background": "#ff6b5f", "border": "#ffffff"},
+            },
+            "function": {
+                "background": "#3498db",
+                "border": "#2471a3",
+                "highlight": {"background": "#5dade2", "border": "#ffffff"},
+            },
+            "method": {
+                "background": "#2ecc71",
+                "border": "#1e8449",
+                "highlight": {"background": "#58d68d", "border": "#ffffff"},
+            },
+            "file": {
+                "background": "#f39c12",
+                "border": "#d68910",
+                "highlight": {"background": "#f7dc6f", "border": "#ffffff"},
+            },
+            "module": {
+                "background": "#9b59b6",
+                "border": "#7d3c98",
+                "highlight": {"background": "#af7ac5", "border": "#ffffff"},
+            },
         }
-        simple_color_map = {"class": "#e74c3c", "function": "#3498db", "method": "#2ecc71", "file": "#f39c12", "module": "#9b59b6"}
-        shape_map = {"class": "dot", "function": "ellipse", "method": "box", "file": "square", "module": "diamond"}
+        simple_color_map = {
+            "class": "#e74c3c",
+            "function": "#3498db",
+            "method": "#2ecc71",
+            "file": "#f39c12",
+            "module": "#9b59b6",
+        }
+        shape_map = {
+            "class": "dot",
+            "function": "ellipse",
+            "method": "box",
+            "file": "square",
+            "module": "diamond",
+        }
         edge_color_map = {
             "calls": "#2f80ed",
             "contains": "#8e44ad",
             "imports": "#e67e22",
             "references": "#1abc9c",
             "file_contains": "#f39c12",
-            "module_contains": "#9b59b6"
+            "module_contains": "#9b59b6",
         }
 
         # ===== 4. CHUẨN BỊ DATA CHO ĐỒ THỊ =====
@@ -1902,34 +1957,76 @@ Just show me the edits I need to make.
             name = sym.get("name", "")
             file_path = sym.get("file_path", "")
             line = sym.get("start_line", 0)
-            nodes_json.append({
-                "id": sym["id"],
-                "label": name,
-                "color": color_map.get(kind, {"background": "#95a5a6", "border": "#7f8c8d", "highlight": {"background": "#bdc3c7", "border": "#ffffff"}}),
-                "shape": shape_map.get(kind, "ellipse"),
-                "title": f"{kind.upper()}: {name}\nFile: {file_path}\nLine: {line}\nPageRank: {pagerank:.4f}",
-                "size": max(12, min(45, pagerank * 250 + 12)),
-                "kind": kind, "file": file_path, "pagerank": pagerank,
-                "font": {"color": "#ffffff", "size": 14},
-            })
+            nodes_json.append(
+                {
+                    "id": sym["id"],
+                    "label": name,
+                    "color": color_map.get(
+                        kind,
+                        {
+                            "background": "#95a5a6",
+                            "border": "#7f8c8d",
+                            "highlight": {"background": "#bdc3c7", "border": "#ffffff"},
+                        },
+                    ),
+                    "shape": shape_map.get(kind, "ellipse"),
+                    "title": (
+                        f"{kind.upper()}: {name}\nFile: {file_path}\nLine: {line}\nPageRank:"
+                        f" {pagerank:.4f}"
+                    ),
+                    "size": max(12, min(45, pagerank * 250 + 12)),
+                    "kind": kind,
+                    "file": file_path,
+                    "pagerank": pagerank,
+                    "font": {"color": "#ffffff", "size": 14},
+                }
+            )
 
         for fn in file_nodes:
-            nodes_json.append({
-                "id": fn["id"], "label": fn["label"],
-                "color": color_map.get("file", {"background": "#f39c12", "border": "#d68910", "highlight": {"background": "#f7dc6f", "border": "#ffffff"}}),
-                "shape": "square", "title": fn["title"],
-                "size": 20, "kind": "file", "file": "", "pagerank": 0.5,
-                "font": {"color": "#ffffff", "size": 14},
-            })
+            nodes_json.append(
+                {
+                    "id": fn["id"],
+                    "label": fn["label"],
+                    "color": color_map.get(
+                        "file",
+                        {
+                            "background": "#f39c12",
+                            "border": "#d68910",
+                            "highlight": {"background": "#f7dc6f", "border": "#ffffff"},
+                        },
+                    ),
+                    "shape": "square",
+                    "title": fn["title"],
+                    "size": 20,
+                    "kind": "file",
+                    "file": "",
+                    "pagerank": 0.5,
+                    "font": {"color": "#ffffff", "size": 14},
+                }
+            )
 
         for mn in module_nodes:
-            nodes_json.append({
-                "id": mn["id"], "label": mn["label"],
-                "color": color_map.get("module", {"background": "#9b59b6", "border": "#7d3c98", "highlight": {"background": "#af7ac5", "border": "#ffffff"}}),
-                "shape": "diamond", "title": mn["title"],
-                "size": 25, "kind": "module", "file": "", "pagerank": 0.8,
-                "font": {"color": "#ffffff", "size": 14},
-            })
+            nodes_json.append(
+                {
+                    "id": mn["id"],
+                    "label": mn["label"],
+                    "color": color_map.get(
+                        "module",
+                        {
+                            "background": "#9b59b6",
+                            "border": "#7d3c98",
+                            "highlight": {"background": "#af7ac5", "border": "#ffffff"},
+                        },
+                    ),
+                    "shape": "diamond",
+                    "title": mn["title"],
+                    "size": 25,
+                    "kind": "module",
+                    "file": "",
+                    "pagerank": 0.8,
+                    "font": {"color": "#ffffff", "size": 14},
+                }
+            )
 
         edges_json = []
         for e in edges:
@@ -1937,7 +2034,8 @@ Just show me the edits I need to make.
 
         # ===== 5. HÀM RENDER DANH SÁCH =====
         def render_symbol_list(title, items, color, limit=12):
-            if not items: return f"<h3>{title}</h3><div class='summary-box'>Không có dữ liệu.</div>"
+            if not items:
+                return f"<h3>{title}</h3><div class='summary-box'>Không có dữ liệu.</div>"
             html_items = ""
             for s in items[:limit]:
                 name = escape(str(s.get("name", "")))
@@ -1953,7 +2051,8 @@ Just show me the edits I need to make.
             return f"<h3>{title}</h3><div class='top-symbols'>{html_items}</div>"
 
         def render_communities(items, limit=10):
-            if not items: return "<div class='summary-box'>Không có dữ liệu module.</div>"
+            if not items:
+                return "<div class='summary-box'>Không có dữ liệu module.</div>"
             html_items = ""
             for c in items[:limit]:
                 cid = escape(str(c.get("id", "")))
@@ -2045,9 +2144,9 @@ Just show me the edits I need to make.
         </div>
         <h3>🧩 Modules</h3>
         {render_communities(communities_data)}
-        {render_symbol_list("🔴 Top Classes", sorted([s for s in symbols if s.get("kind") == "class"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["class"])}
-        {render_symbol_list("🔵 Top Functions", sorted([s for s in symbols if s.get("kind") == "function"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["function"])}
-        {render_symbol_list("🟢 Top Methods", sorted([s for s in symbols if s.get("kind") == "method"], key=lambda x: x.get("pagerank",0) or 0, reverse=True), simple_color_map["method"])}
+        {render_symbol_list("🔴 Top Classes", sorted([s for s in symbols if s.get("kind") == "class"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["class"])}
+        {render_symbol_list("🔵 Top Functions", sorted([s for s in symbols if s.get("kind") == "function"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["function"])}
+        {render_symbol_list("🟢 Top Methods", sorted([s for s in symbols if s.get("kind") == "method"], key=lambda x: x.get("pagerank", 0) or 0, reverse=True), simple_color_map["method"])}
     </div>
     <div id="graph"></div>
     </div>
@@ -2155,7 +2254,14 @@ Just show me the edits I need to make.
 
         webbrowser.open("file://" + os.path.abspath(output_path))
         self.io.tool_output(f"✅ Đã tạo báo cáo: {output_path}")
-        self.io.tool_output(f"📊 Symbols: {total_symbols}, Classes: {classes}, Functions: {functions}, Methods: {methods}, Files: {len(file_nodes)}, Modules: {len(module_nodes)}, Edges: {total_edges}")
+        self.io.tool_output(
+            f"📊 Symbols: {total_symbols}, Classes: {classes}, "
+            f"Functions: {functions}, Methods: {methods}, "
+            f"Files: {len(file_nodes)}, Modules: {len(module_nodes)}, "
+            f"Edges: {total_edges}"
+        )
+
+
 def expand_subdir(file_path):
     if file_path.is_file():
         yield file_path

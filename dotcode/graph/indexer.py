@@ -1,11 +1,10 @@
 # dotcode/graph/indexer.py
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
-from platform import node
 
-import json
 import tree_sitter_javascript as tsjavascript
 import tree_sitter_languages
 import tree_sitter_python as tspython
@@ -216,7 +215,7 @@ class Indexer:
         code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
         tree = parser.parse(bytes(code, "utf-8"))
 
-        rel_path = os.path.relpath(file_path, self.root).replace('\\', '/')
+        rel_path = os.path.relpath(file_path, self.root).replace("\\", "/")
 
         symbols = self._extract_symbols(tree.root_node, rel_path, language)  # Truyền language
         edges = self._extract_edges(tree.root_node, rel_path, symbols)
@@ -272,27 +271,33 @@ class Indexer:
 
     def _extract_symbols(self, root_node, file_path: str, language: str = "python"):
         symbols = []
-        #print(f"DEBUG _extract_symbols: language={language}, file_path={file_path[:50]}")
+        # print(f"DEBUG _extract_symbols: language={language}, file_path={file_path[:50]}")
         if language == "python":
-            #print("  -> Using _traverse_for_symbols")
+            # print("  -> Using _traverse_for_symbols")
             self._traverse_for_symbols(root_node, file_path, symbols, parent_class=None)
         else:
-            #print("  -> Using _traverse_generic")
+            # print("  -> Using _traverse_generic")
             self._traverse_generic(root_node, file_path, symbols, parent_class=None)
-        #print(f"  -> Symbols found: {len(symbols)}")
+        # print(f"  -> Symbols found: {len(symbols)}")
         return symbols
+
     # ========== GENERIC TRAVERSAL (FALLBACK) ==========
     def _traverse_generic(self, node, file_path, symbols=None, parent_class=None):
         if symbols is None:
             symbols = []
 
         is_function = node.type in (
-            "function_definition", "function_declaration", "method_definition",
-            "function_item", "arrow_function",
+            "function_definition",
+            "function_declaration",
+            "method_definition",
+            "function_item",
+            "arrow_function",
         )
         is_class = node.type in (
-            "class_definition", "class_declaration",
-            "struct_item", "impl_item",
+            "class_definition",
+            "class_declaration",
+            "struct_item",
+            "impl_item",
         )
 
         def get_name(n):
@@ -300,7 +305,12 @@ class Indexer:
             if name_node:
                 return name_node.text.decode("utf-8")
             for child in n.children:
-                if child.type in ("identifier", "type_identifier", "property_identifier", "simple_identifier"):
+                if child.type in (
+                    "identifier",
+                    "type_identifier",
+                    "property_identifier",
+                    "simple_identifier",
+                ):
                     return child.text.decode("utf-8")
             return None
 
@@ -329,21 +339,37 @@ class Indexer:
                 body_node = self._get_child(node, "body")
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    "id": sym_id, "name": name, "kind": kind,
-                    "start_line": node.start_point[0] + 1, "end_line": node.end_point[0] + 1,
-                    "signature": name, "body_hash": body_hash, "complexity": 0, "metadata": json.dumps(self._extract_http_metadata(node)),
-                })
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": name,
+                        "kind": kind,
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": name,
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": json.dumps(self._extract_http_metadata(node)),
+                    }
+                )
             elif is_class:
                 sym_id = f"{file_path}::{name}"
                 body_node = self._get_child(node, "body")
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
-                symbols.append({
-                    "id": sym_id, "name": name, "kind": "class",
-                    "start_line": node.start_point[0] + 1, "end_line": node.end_point[0] + 1,
-                    "signature": f"class {name}", "body_hash": body_hash, "complexity": 0, "metadata": json.dumps(self._extract_http_metadata(node)),
-                })
+                symbols.append(
+                    {
+                        "id": sym_id,
+                        "name": name,
+                        "kind": "class",
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                        "signature": f"class {name}",
+                        "body_hash": body_hash,
+                        "complexity": 0,
+                        "metadata": json.dumps(self._extract_http_metadata(node)),
+                    }
+                )
                 if body_node:
                     for child in body_node.children:
                         self._traverse_generic(child, file_path, symbols, name)
@@ -352,9 +378,16 @@ class Indexer:
 
         # Node bao bọc: duyệt vào bên trong
         if node.type in (
-            "expression_statement", "program", "module", "script",
-            "export_statement", "lexical_declaration", "variable_declaration",
-            "object", "pair", "statement_block",
+            "expression_statement",
+            "program",
+            "module",
+            "script",
+            "export_statement",
+            "lexical_declaration",
+            "variable_declaration",
+            "object",
+            "pair",
+            "statement_block",
         ):
             for child in node.children:
                 self._traverse_generic(child, file_path, symbols, parent_class)
@@ -362,7 +395,6 @@ class Indexer:
 
         for child in node.children:
             self._traverse_generic(child, file_path, symbols, parent_class)
-
 
     # ========== SYMBOL FACTORIES ==========
     def _make_function_symbol(self, node, file_path):
@@ -607,9 +639,9 @@ class Indexer:
 
     def _traverse_for_symbols(self, node, file_path: str, symbols: list, parent_class=None):
         """Đệ quy tìm function_definition và class_definition (Python)."""
-        #if not hasattr(self, '_debug_printed'):
-            #self._debug_printed = True
-            #print(f"DEBUG root children: {[c.type for c in node.children[:20]]}")
+        # if not hasattr(self, '_debug_printed'):
+        # self._debug_printed = True
+        # print(f"DEBUG root children: {[c.type for c in node.children[:20]]}")
         if node.type == "function_definition":
             name_node = self._get_child(node, "name")
             if name_node:
@@ -620,7 +652,7 @@ class Indexer:
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
                 meta = self._extract_http_metadata(node)
-                #print(f"DEBUG metadata for function {name}: {meta}")
+                # print(f"DEBUG metadata for function {name}: {meta}")
                 symbols.append(
                     {
                         "id": sym_id,
@@ -636,7 +668,7 @@ class Indexer:
                         "body_hash": body_hash,
                         "complexity": 0,
                         "metadata": json.dumps(meta),
-                        "parent_class": parent_class,       
+                        "parent_class": parent_class,
                     }
                 )
         elif node.type == "class_definition":
@@ -648,7 +680,7 @@ class Indexer:
                 body_text = body_node.text.decode("utf-8") if body_node else ""
                 body_hash = hashlib.md5(body_text.encode()).hexdigest()
                 meta = self._extract_http_metadata(node)
-                #print(f"DEBUG metadata for class {class_name}: {meta}")
+                # print(f"DEBUG metadata for class {class_name}: {meta}")
                 symbols.append(
                     {
                         "id": sym_id,
@@ -669,9 +701,9 @@ class Indexer:
                             child, file_path, symbols, parent_class=class_name
                         )
                 return  # Không duyệt tiếp vào class body ở vòng ngoài
-            
+
         elif node.type == "decorated_definition":
-            #print(f"  -> Traversing decorated definition, children: {[c.type for c in node.children]}")
+            # print(f"  -> Traversing decorated definition, children: {[c.type for c in node.children]}")
             for child in node.children:
                 self._traverse_for_symbols(child, file_path, symbols, parent_class)
             return
@@ -699,74 +731,74 @@ class Indexer:
         for child in node.children:
             self._collect_names(child, names)
 
-
     def _extract_http_metadata(self, node):
         """Trích xuất HTTP method và path từ decorator của FastAPI/Flask."""
         http_info = {}
         import re
-        
+
         parent = node.parent
-        
+
         # Trường hợp function nằm trong decorated_definition (có decorator)
-        if parent and parent.type == 'decorated_definition':
+        if parent and parent.type == "decorated_definition":
             for child in parent.children:
-                if child.type == 'decorator':
-                    decorator_text = child.text.decode('utf-8')
+                if child.type == "decorator":
+                    decorator_text = child.text.decode("utf-8")
                     http_info = self._parse_decorator(decorator_text, http_info)
                     if http_info:
                         break
-            if http_info and 'path' in http_info:
+            if http_info and "path" in http_info:
                 router_prefix = self._get_router_prefix(node)
                 if router_prefix:
-                    http_info['path'] = router_prefix + http_info['path']
+                    http_info["path"] = router_prefix + http_info["path"]
             return http_info
-        
+
         # Trường hợp function nằm trực tiếp trong block/module
-        if parent and parent.type in ('block', 'module'):
+        if parent and parent.type in ("block", "module"):
             func_idx = None
             for i, child in enumerate(parent.children):
                 if child == node:
                     func_idx = i
                     break
-            
+
             if func_idx is not None and func_idx > 0:
                 prev = parent.children[func_idx - 1]
-                if prev.type == 'decorator':
-                    decorator_text = prev.text.decode('utf-8')
+                if prev.type == "decorator":
+                    decorator_text = prev.text.decode("utf-8")
                     http_info = self._parse_decorator(decorator_text, http_info)
-        
-        if http_info and 'path' in http_info:
+
+        if http_info and "path" in http_info:
             router_prefix = self._get_router_prefix(node)
             if router_prefix:
-                http_info['path'] = router_prefix + http_info['path']
-        
+                http_info["path"] = router_prefix + http_info["path"]
+
         return http_info
 
     def _parse_decorator(self, decorator_text, http_info):
         """Parse một decorator để lấy method và path."""
-        #print(f"DEBUG _parse_decorator: {decorator_text[:100]}")  # Thêm dòng này
+        # print(f"DEBUG _parse_decorator: {decorator_text[:100]}")  # Thêm dòng này
 
         # FastAPI: @router.post("/books/borrow") hoặc @app.get("/books/search")
         fastapi_match = re.search(
             r'@(?:app|router)\.(get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)["\']',
-            decorator_text
+            decorator_text,
         )
         if fastapi_match:
-            http_info['method'] = fastapi_match.group(1).upper()
-            http_info['path'] = fastapi_match.group(2)
-            http_info['framework'] = 'FastAPI'
-            #print(f"  -> Parsed: {http_info}")  # Thêm dòng này
+            http_info["method"] = fastapi_match.group(1).upper()
+            http_info["path"] = fastapi_match.group(2)
+            http_info["framework"] = "FastAPI"
+            # print(f"  -> Parsed: {http_info}")  # Thêm dòng này
 
         return http_info
 
     def _get_router_prefix(self, node):
         """Tìm router prefix từ file (ví dụ: @router = APIRouter(prefix="/api"))."""
         import re
+
         try:
             root = node
             while root.parent:
                 root = root.parent
-            code = root.text.decode('utf-8')
+            code = root.text.decode("utf-8")
             match = re.search(r'APIRouter\s*\(\s*prefix\s*=\s*["\']([^"\']+)["\']', code)
             if match:
                 return match.group(1)

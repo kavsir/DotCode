@@ -75,7 +75,7 @@ Expose 10+ tools for any AI agent:
 ### Install from source
 
 ```bash
-git clone https://github.com/yourusername/DotCode.git
+git clone https://github.com/kavsir/DotCode.git
 cd DotCode
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -208,4 +208,4 @@ DotCode is licensed under the [Apache License 2.0](LICENSE), the same license as
 
 ---
 
-<p align="center">Made with ❤️ by [Your Name] – <a href="https://github.com/yourusername/DotCode">GitHub</a></p>
+<p align="center">Made with ❤️ by Kvasri – <a href="https://github.com/kavsir/DotCode.git">GitHub</a></p>
