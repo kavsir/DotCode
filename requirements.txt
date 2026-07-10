@@ -493,3 +493,4 @@ langgraph
 chromadb
 python-igraph
 leidenalg
+sentence-transformers
