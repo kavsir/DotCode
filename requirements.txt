@@ -491,3 +491,4 @@ audioop-lts>=0.2.2; python_version >= "3.13"
 langchain-openai
 langgraph
 chromadb
+python-igraph
