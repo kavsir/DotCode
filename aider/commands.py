@@ -1725,7 +1725,7 @@ Just show me the edits I need to make.
         for sym in symbols:
             fp = sym.get("file_path", "")
             if fp not in file_set:
-                fp_clean = fp.replace('/', '_').replace('\\', '_')
+                fp_clean = fp.replace("/", "_").replace("\\", "_")
                 file_set[fp] = {
                     "id": f"FILE::{fp_clean}",
                     "label": os.path.basename(fp),
