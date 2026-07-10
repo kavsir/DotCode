@@ -494,3 +494,9 @@ chromadb
 python-igraph
 leidenalg
 sentence-transformers
+tree-sitter-javascript
+tree-sitter-python
+tree-sitter-rust
+tree-sitter-typescript
+tree_sitter_languages
+neo4j
