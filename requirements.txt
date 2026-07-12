@@ -487,7 +487,6 @@ scipy<1.16; python_version < "3.11"
 scipy>=1.16.1,<1.18; python_version >= "3.11"
 # Remove if Python 3.13+ support lands in pydub upstream.
 audioop-lts>=0.2.2; python_version >= "3.13"
-
 langchain-openai
 langgraph
 chromadb
@@ -498,5 +497,5 @@ tree-sitter-javascript
 tree-sitter-python
 tree-sitter-rust
 tree-sitter-typescript
-tree_sitter_languages
+tree-sitter-languages; python_version < "3.12"
 neo4j
