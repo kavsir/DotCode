@@ -497,5 +497,5 @@ tree-sitter-javascript
 tree-sitter-python
 tree-sitter-rust
 tree-sitter-typescript
-tree-sitter-languages; python_version < "3.12"
+tree-sitter-languages
 neo4j
