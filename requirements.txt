@@ -497,5 +497,4 @@ tree-sitter-javascript
 tree-sitter-python
 tree-sitter-rust
 tree-sitter-typescript
-tree-sitter-languages
 neo4j
