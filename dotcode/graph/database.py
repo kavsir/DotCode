@@ -1,7 +1,7 @@
 import os
 import sqlite3
 
-from git import List, Optional
+from typing import List, Optional
 
 from ..models import Edge, Symbol
 

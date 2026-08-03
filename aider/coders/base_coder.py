@@ -1001,30 +1001,6 @@ class Coder:
                     return
         # ===== Kết thúc DST =====
 
-        # DotCode: Phát hiện câu hỏi kiến trúc trước khi phân loại intent
-        architecture_keywords = [
-            "module chính",
-            "cấu trúc dự án",
-            "kiến trúc",
-            "tổng quan",
-            "có những gì",
-            "bao gồm những gì",
-            "main module",
-            "architecture",
-            "structure",
-            "overview",
-            "components",
-            "có những module",
-            "những module chính",
-            "dự án có những",
-            "có những",
-            "liệt kê",
-        ]
-        if any(kw in message.lower() for kw in architecture_keywords):
-            self._auto_add_context(message, max_files=3)
-            self._handle_question(message)
-            return
-
         # DotCode: Sử dụng Intent Agent để phân loại
         intent, confidence = self.intent_agent.classify(message)
 
@@ -1045,7 +1021,14 @@ class Coder:
         if intent == "question":
             self.pending_question = True
             self._auto_add_context(message, max_files=3)
-            self._handle_question(message)
+            self._handle_question(message, is_architecture=False)
+            self.pending_question = False
+            return
+
+        if intent == "architecture":
+            self.pending_question = True
+            self._auto_add_context(message, max_files=3)
+            self._handle_question(message, is_architecture=True)
             self.pending_question = False
             return
 
@@ -1171,39 +1154,13 @@ class Coder:
         # self.io.tool_output(f"🔍 [DEBUG] _auto_add_context END")
         return added_files
 
-    def _handle_question(self, message):
+    def _handle_question(self, message, is_architecture=False):
         """Xử lý câu hỏi: Global Search → CodeRAG → Fallback."""
-
-        # DEBUG: kiểm tra intent và message
-        intent, confidence = self.intent_agent.classify(message)
-        # self.io.tool_output(f"🔍 [DEBUG] _handle_question intent={intent}, confidence={confidence:.2f}")
-        # self.io.tool_output(f"🔍 [DEBUG] message = '{message[:100]}'")
-
-        # Kiểm tra câu hỏi kiến trúc
-        architecture_keywords = [
-            "module chính",
-            "cấu trúc dự án",
-            "kiến trúc",
-            "tổng quan",
-            "có những gì",
-            "bao gồm những gì",
-            "main module",
-            "architecture",
-            "structure",
-            "overview",
-            "components",
-            "có những module",
-            "những module chính",
-            "dự án có những",
-        ]
-        is_architecture_question = any(kw in message.lower() for kw in architecture_keywords)
-
-        # self.io.tool_output(f" [DEBUG] is_architecture_question = {is_architecture_question}")
         # self.io.tool_output(f" [DEBUG] self.code_graph exists = {self.code_graph is not None}")
         # if self.code_graph:
         # self.io.tool_output(f" [DEBUG] graphrag exists = {self.code_graph.graphrag is not None}")
 
-        if is_architecture_question and self.code_graph:
+        if is_architecture and self.code_graph:
             # Đảm bảo GraphRAG engine đã sẵn sàng
             if hasattr(self.code_graph, "_ensure_graphrag"):
                 self.code_graph._ensure_graphrag()
@@ -1296,89 +1253,81 @@ class Coder:
         if hasattr(self.code_graph, "_ensure_graphrag"):
             self.code_graph._ensure_graphrag()
 
-        # Đảm bảo communities đã được tạo
-        if self.code_graph.graphrag and not self.code_graph.graphrag.communities:
-            self.code_graph.graphrag.detect_communities()
-            self.code_graph.graphrag.summarize_communities()
+        # ===== DotCode: Phân tích ngữ nghĩa tìm kiếm với LLM =====
+        search_params = {"is_bridge": False, "entity1": None, "entity2": None, "kind_filter": None}
+        import os, requests, json
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if api_key:
+            prompt = f"""Phân tích yêu cầu tìm kiếm sau của lập trình viên: "{message}"
+Trả về JSON chứa các key:
+- "is_bridge" (bool): true nếu người dùng đang hỏi về MỐI QUAN HỆ, TƯƠNG TÁC, KẾT NỐI giữa 2 module/component/hàm khác nhau.
+- "entity1" (str): Tên thành phần thứ nhất (nếu is_bridge = true).
+- "entity2" (str): Tên thành phần thứ hai (nếu is_bridge = true).
+- "kind_filter" (str hoặc null): Loại thành phần mà người dùng muốn tìm (chỉ chọn từ: "class", "function", "variable", "interface", "method"), nếu không có thì để null.
+Chỉ trả về JSON hợp lệ."""
+            try:
+                response = requests.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 100, "temperature": 0.0},
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    c = response.json()["choices"][0]["message"]["content"].strip()
+                    if "```json" in c: c = c.split("```json")[1].split("```")[0].strip()
+                    elif "```" in c: c = c.split("```")[1].split("```")[0].strip()
+                    search_params.update(json.loads(c))
+            except Exception:
+                pass
 
-        # ===== DotCode: Cross-Community Bridge Analysis (ưu tiên) =====
-        import re
-
-        bridge_patterns = [
-            (
-                r"(module|community|cộng"
-                r" đồng|phần)\s+\"?(?P<name1>\w+)\"?\s+(và|với|and|to|đến)\s+(module|community|cộng"
-                r" đồng|phần)\s+\"?(?P<name2>\w+)\"?"
-            ),
-            (
-                r"(?P<name1>\w+)\s+(có|is)\s+(liên quan|related|connected|kết"
-                r" nối)\s+(đến|tới|to)\s+(?P<name2>\w+)"
-            ),
-        ]
-
-        for pattern in bridge_patterns:
-            match = re.search(pattern, message, re.IGNORECASE)
-            if match and self.code_graph.graphrag and self.code_graph.graphrag.communities:
-                name1 = match.group("name1")
-                name2 = match.group("name2")
-
+        if search_params.get("is_bridge") and search_params.get("entity1") and search_params.get("entity2"):
+            if self.code_graph.graphrag and not self.code_graph.graphrag.communities:
+                self.code_graph.graphrag.detect_communities()
+                self.code_graph.graphrag.summarize_communities()
+                
+            if self.code_graph.graphrag and self.code_graph.graphrag.communities:
+                name1 = search_params["entity1"]
+                name2 = search_params["entity2"]
                 syms1 = self.code_graph.search(name1, limit=1)
                 syms2 = self.code_graph.search(name2, limit=1)
-
                 if syms1 and syms2:
-                    comm1 = self.code_graph.graphrag.node_to_community.get(syms1[0]["id"])
-                    comm2 = self.code_graph.graphrag.node_to_community.get(syms2[0]["id"])
-
+                    sym1_id = syms1[0].id if hasattr(syms1[0], "id") else syms1[0]["id"]
+                    sym2_id = syms2[0].id if hasattr(syms2[0], "id") else syms2[0]["id"]
+                    comm1 = self.code_graph.graphrag.node_to_community.get(sym1_id)
+                    comm2 = self.code_graph.graphrag.node_to_community.get(sym2_id)
                     if comm1 is not None and comm2 is not None and comm1 != comm2:
                         from dotcode.graph.multi_hop import MultiHopEngine
-
-                        raw_db = (
-                            self.code_graph.db._db
-                            if hasattr(self.code_graph.db, "_db")
-                            else self.code_graph.db
-                        )
+                        raw_db = self.code_graph.db._db if hasattr(self.code_graph.db, "_db") else self.code_graph.db
                         temp_multi_hop = MultiHopEngine(raw_db)
-
                         bridges = temp_multi_hop.find_community_bridges(
-                            comm1,
-                            comm2,
-                            self.code_graph.graphrag.node_to_community,
-                            edge_types=["calls", "references", "contains"],
+                            comm1, comm2, self.code_graph.graphrag.node_to_community,
+                            edge_types=["calls", "references", "contains"]
                         )
-
                         comm1_data = self.code_graph.graphrag.communities.get(comm1, {})
                         comm2_data = self.code_graph.graphrag.communities.get(comm2, {})
-
-                        self.io.tool_output(f"🌉 Cross-Community Bridge Analysis:")
-                        self.io.tool_output(
-                            f"  Community {comm1}: {comm1_data.get('summary', 'N/A')[:100]}..."
-                        )
-                        self.io.tool_output(
-                            f"  Community {comm2}: {comm2_data.get('summary', 'N/A')[:100]}..."
-                        )
+                        self.io.tool_output(f"🌉 Phân tích liên kết {name1} ↔ {name2}:")
+                        self.io.tool_output(f"  Community {comm1}: {comm1_data.get('summary', 'N/A')[:100]}...")
+                        self.io.tool_output(f"  Community {comm2}: {comm2_data.get('summary', 'N/A')[:100]}...")
                         self.io.tool_output(f"  Bridges found: {len(bridges)}")
-
                         for b in bridges[:5]:
                             self.io.tool_output(
                                 f"    • {b['source'].name} ({b['source'].file_path}) →"
                                 f" {b['target'].name} ({b['target'].file_path}) [{b['edge_type']}]"
                             )
-
                         if len(bridges) == 0:
                             self.io.tool_output("  → Hai module này không có kết nối trực tiếp.")
                         elif len(bridges) <= 2:
                             self.io.tool_output("  → Kết nối yếu, hai module hoạt động độc lập.")
                         elif len(bridges) <= 5:
-                            self.io.tool_output("  → Kết nối trung bình, có phụ thuộc qua lại.")
+                            self.io.tool_output("  → Có sự tương tác rõ ràng giữa hai module.")
                         else:
-                            self.io.tool_output("  → Kết nối chặt chẽ, nên phát triển đồng bộ.")
-
+                            self.io.tool_output("  → Tương tác rất chặt chẽ, chú ý blast radius khi sửa đổi.")
                         return
 
         # ===== Tìm kiếm thông thường =====
         all_symbols = []
         seen_ids = set()
-
+        import re
         tokens = re.findall(r"[\w]+", message, re.UNICODE)
         tokens = [t for t in tokens if len(t) >= 3 and not t.isdigit()]
         for token in tokens[:5]:
@@ -1388,12 +1337,10 @@ class Coder:
                 if sym_id not in seen_ids:
                     seen_ids.add(sym_id)
                     all_symbols.append(sym)
-
+                    
         if hasattr(self.code_graph, "graphrag") and self.code_graph.graphrag:
             try:
-                semantic_results = self.code_graph.graphrag.semantic_search(
-                    message, limit=10, boost_pagerank=True
-                )
+                semantic_results = self.code_graph.graphrag.semantic_search(message, limit=10, boost_pagerank=True)
                 for r in semantic_results:
                     detail = r.get("detail")
                     if detail:
@@ -1407,9 +1354,10 @@ class Coder:
                             all_symbols.append(detail)
             except Exception as e:
                 self.io.tool_output(f"🔍 Semantic search error: {e}")
-
+                
         file_mentions = self.get_file_mentions(message)
         for rel_fname in file_mentions:
+            import os
             abs_fname = self.abs_root_path(rel_fname)
             if os.path.exists(abs_fname):
                 file_symbols = self.code_graph.db.get_symbols_in_file(rel_fname)
@@ -1418,13 +1366,8 @@ class Coder:
                     if sym_id not in seen_ids:
                         seen_ids.add(sym_id)
                         all_symbols.append(sym)
-
-        kind_filter = None
-        if re.search(r"\bclass(es)?\b", message, re.IGNORECASE):
-            kind_filter = "class"
-        elif re.search(r"\b(function|method|hàm|phương thức)\b", message, re.IGNORECASE):
-            kind_filter = "function"
-
+                        
+        kind_filter = search_params.get("kind_filter")
         if kind_filter and all_symbols:
             filtered = []
             for s in all_symbols:
@@ -1438,43 +1381,37 @@ class Coder:
                 elif s_kind == kind_filter:
                     filtered.append(s)
             all_symbols = filtered
-
+            
         if all_symbols:
-
             def get_score(sym):
                 if isinstance(sym, dict):
                     combined = sym.get("combined_score", 0.0)
                     pagerank = sym.get("pagerank", 0.0)
                 else:
-                    combined = (
-                        getattr(sym, "combined_score", 0.0)
-                        if hasattr(sym, "combined_score")
-                        else 0.0
-                    )
+                    combined = getattr(sym, "combined_score", 0.0) if hasattr(sym, "combined_score") else 0.0
                     pagerank = getattr(sym, "pagerank", 0.0) if hasattr(sym, "pagerank") else 0.0
-
                 if combined is not None and combined > 0:
                     return combined
                 return pagerank if pagerank is not None else 0.0
-
+                
             all_symbols.sort(key=get_score, reverse=True)
-
             self.io.tool_output(f"🔍 Found {len(all_symbols)} results:")
             for sym in all_symbols[:10]:
                 if isinstance(sym, dict):
                     kind = sym.get("kind", "?")
                     name = sym.get("name", "?")
-                    file_path = sym.get("file_path", "?")
-                    combined = sym.get("combined_score", 0.0)
+                    path = sym.get("file_path", "?")
                 else:
-                    kind = sym.kind.value if hasattr(sym.kind, "value") else str(sym.kind)
+                    kind = (
+                        sym.kind.value
+                        if hasattr(sym, "kind") and hasattr(sym.kind, "value")
+                        else str(sym.kind)
+                    )
                     name = sym.name
-                    file_path = sym.file_path
-                    combined = getattr(sym, "combined_score", 0.0)
-                if combined > 0:
-                    self.io.tool_output(f"  - {kind} {name} in {file_path} (score: {combined:.3f})")
-                else:
-                    self.io.tool_output(f"  - {kind} {name} in {file_path}")
+                    path = sym.file_path
+                self.io.tool_output(f"  • [{kind}] {name} ({path})")
+        else:
+            self.io.tool_output("🔍 No matching symbols found.")
 
     def check_and_open_urls(self, exc, friendly_msg=None):
         """Check exception for URLs, offer to open in a browser, with user-friendly error msgs."""
@@ -3192,4 +3129,5 @@ class Coder:
         # Mặc định: gửi lại câu hỏi gốc với yêu cầu thực hiện
         if state.question_text:
             self.io.tool_output("Đang thực hiện yêu cầu...")
-            # TODO: Gửi lại prompt gốc để AI thực hiện
+            # Gửi lại prompt gốc để AI thực hiện
+            self._handle_command(state.question_text)

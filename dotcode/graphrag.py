@@ -10,7 +10,7 @@ import numpy as np
 from chromadb.config import Settings
 from huggingface_hub import login
 from sentence_transformers import SentenceTransformer
-from sympy import symbols
+
 
 
 class GraphRAGEngine:

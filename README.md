@@ -16,9 +16,33 @@
 ## 🧠 Architecture Overview
 
 ```
-User Input → Intent Agent → Code Graph + GraphRAG → Hybrid Context → LLM → Response
-                                                                          │
-                                                              MCP Server (10+ tools)
+User Input
+    │
+    ├──► DialogueStateTracker (dst.py)     ← Multi-turn context, TTL, pending questions
+    │
+    ├──► IntentAgent (agents/)             ← LLM classify + rule-based fallback (VI/EN)
+    │         question / search / command / architecture / ambiguous
+    │
+    ├──► SafeModelRouter (model_router.py)
+    │         SIMPLE → flash | MODERATE → chat | COMPLEX → pro
+    │
+    ├──► CodeGraph (graph/)                ← Structural analysis hub
+    │         ├── Indexer (Tree-sitter, 20+ languages)
+    │         ├── SQLite / Neo4j backend (auto-select by symbol count)
+    │         ├── PageRank (networkx, alpha=0.85)
+    │         ├── MultiHopEngine           ← k-hop, shortest path, community bridges
+    │         └── GraphRAGEngine           ← Leiden communities, BAAI/bge-m3, ChromaDB
+    │
+    ├──► CodeRAG (code_rag.py)             ← LangChain ReAct agent
+    │         code_graph_tool + graphrag_tool
+    │
+    ├──► ContextPruner (context_pruner.py) ← Token reduction before LLM call
+    │
+    ├──► HITLManager (hitl.py)             ← Risk classification for code changes
+    │
+    ├──► SAGEEngine (sage.py)              ← Long-term memory (SQLite events)
+    │
+    └──► MCP Server (mcp_server.py)        ← 10 tools via FastMCP
 ```
 
 DotCode's core innovation is the **deep integration** between two knowledge engines:
@@ -26,7 +50,7 @@ DotCode's core innovation is the **deep integration** between two knowledge engi
 | Engine | Role | Technology |
 |--------|------|------------|
 | **Code Graph** | Structural understanding (call graph, inheritance, imports) | Tree-sitter, SQLite, PageRank |
-| **GraphRAG** | Semantic understanding (communities, summaries, embeddings) | ChromaDB, Leiden algorithm, LLM |
+| **GraphRAG** | Semantic understanding (communities, summaries, embeddings) | ChromaDB, Leiden algorithm, BAAI/bge-m3 |
 
 Together, they enable DotCode to:
 - Answer architectural questions ("What are the main modules?")
@@ -40,29 +64,47 @@ Together, they enable DotCode to:
 ## ✨ Key Features
 
 ### 🔍 Deep Code Understanding
-- **Multi-language support**: Python, JavaScript, TypeScript, Rust, and 50+ others via Tree-sitter
+- **Multi-language support**: Python, JavaScript, TypeScript, Rust, Go, Java, Kotlin, and more via Tree-sitter
 - **Cross-file analysis**: Tracks function calls across the entire codebase
-- **Community detection**: Automatically groups related code into semantic modules
-- **LLM-powered summaries**: Each module gets a natural language description
+- **Community detection**: Automatically groups related code into semantic modules using the Leiden algorithm
+- **LLM-powered summaries**: Each module gets a natural language description (DeepSeek, fallback to rule-based)
 
 ### 🧠 Intelligent Agent
-- **Multi-intent classifier**: Distinguishes questions, commands, searches, and ambiguous inputs
-- **Auto-context expansion**: Automatically adds relevant files to the chat
-- **CodeRAG**: LangChain-based agent combining structural and semantic search
-- **Model Router**: Automatically selects the cheapest capable LLM for each task
+- **Multi-intent classifier**: Distinguishes `question`, `search`, `command`, `architecture`, and `ambiguous` inputs — supports Vietnamese & English
+- **Dialogue State Tracker**: Manages multi-turn conversation context with TTL and pending questions
+- **Context Pruner**: Automatically trims conversation history to reduce token cost while keeping relevant messages
+- **CodeRAG**: LangChain ReAct agent combining structural (Code Graph) and semantic (GraphRAG) search
+- **Model Router**: Automatically selects the cheapest capable LLM based on task complexity
 
 ### 🌐 MCP Server (Model Context Protocol)
-Expose 10+ tools for any AI agent:
-- `get_callees` / `get_callers`
-- `search_code` / `global_search` / `local_search`
-- `get_blast_radius` / `get_unused_symbols`
-- `multi_hop_query` (k-hop, shortest path, community bridges)
+Expose 10 tools for any AI agent via FastMCP:
+
+| Tool | Description |
+|------|-------------|
+| `get_callees` | Functions called by a symbol |
+| `get_callers` | Functions that call a symbol |
+| `search_code` | Search symbols by name/signature |
+| `global_search` | Find relevant communities by query |
+| `local_search` | Symbol details + neighbors (BFS) |
+| `get_blast_radius` | Impact analysis (direct/indirect callers) |
+| `get_unused_symbols` | Dead code detection |
+| `get_file_context` | Context summary for one or more files |
+| `get_community_context` | Community details by ID or symbol name |
+| `multi_hop_query` | k-hop / shortest path / community bridges |
+
+### 📊 `/codebase` Report Command
+Generate an interactive HTML report of the entire codebase:
+- **Interactive graph** powered by vis.js (nodes sized by PageRank, colored by kind)
+- **AI summary** generated by LLM (DeepSeek), with rule-based fallback
+- **Statistics**: files, symbols, classes, functions, methods, relationships, languages, modules
+- **Community cards** with summaries and key symbols
+- Toggle visibility of node types (class/function/method/file/module) and edge types
 
 ### 🛡️ Safety & Optimization
-- **HITL Manager**: Auto-applies safe changes, asks confirmation for risky ones
-- **Incremental Update**: Automatically syncs Code Graph + GraphRAG after every commit/undo
-- **CLAUDE.md integration**: Behavioral guidelines for cleaner, more focused code generation
-- **Automatic backend selection**: SQLite for small projects, Neo4j for large ones
+- **HITL Manager**: Classifies code changes as LOW (auto-apply) / MEDIUM (confirm) / HIGH (review)
+- **Incremental Update**: Automatically syncs Code Graph + GraphRAG after every commit/edit
+- **Automatic backend selection**: SQLite for small projects (<5000 symbols), Neo4j for large ones
+- **SAGE Memory**: Learns from user feedback — boosts (×1.5) or decays (×0.5) symbol relevance
 
 ---
 
@@ -90,6 +132,9 @@ export DEEPSEEK_API_KEY=sk-your-key-here
 
 # OpenAI (optional)
 export OPENAI_API_KEY=sk-your-key-here
+
+# HuggingFace (for BAAI/bge-m3 embedding model)
+export HF_TOKEN=hf-your-token-here
 ```
 
 ---
@@ -121,6 +166,9 @@ In the DotCode shell:
 
 # Impact analysis
 > Book có liên quan đến LibraryService không?
+
+# Generate interactive codebase report (HTML)
+> /codebase
 ```
 
 ---
@@ -129,26 +177,33 @@ In the DotCode shell:
 
 ```
 DotCode/
-├── aider/                  # Aider core (forked & enhanced)
+├── aider/                      # Aider core (forked & enhanced)
+│   └── commands.py             # Slash commands (includes /codebase)
 ├── dotcode/
-│   ├── agents/             # IntentAgent (multi-lingual classifier)
-│   ├── graph/              # Code Graph Engine
-│   │   ├── database.py     # SQLite schema
-│   │   ├── indexer.py      # Multi-language parser
-│   │   ├── interface.py    # GraphDBInterface (abstract)
-│   │   ├── sqlite_adapter.py
-│   │   ├── neo4j_adapter.py
-│   │   ├── multi_hop.py    # Multi-hop query engine
-│   │   └── queries/        # Tree-sitter queries (.scm files)
-│   ├── graphrag.py         # GraphRAG Engine (communities, embeddings)
-│   ├── model_router.py     # Automatic LLM selection
-│   ├── hitl.py             # Human-in-the-Loop manager
-│   ├── sage.py             # Long-term memory
-│   ├── code_rag.py         # LangChain CodeRAG agent
-│   ├── mcp_server.py       # MCP tools for AI agents
-│   └── models.py           # Pydantic data models
-├── tests/                  # Test suite
-├── requirements/           # Dependencies
+│   ├── agents/
+│   │   └── intent_agent.py     # LLM + rule-based intent classifier (VI/EN)
+│   ├── graph/
+│   │   ├── __init__.py         # CodeGraph: main integration class
+│   │   ├── database.py         # SQLite schema (symbols, edges, events)
+│   │   ├── indexer.py          # Multi-language Tree-sitter parser
+│   │   ├── interface.py        # GraphDBInterface (abstract base)
+│   │   ├── sqlite_adapter.py   # SQLite backend
+│   │   ├── neo4j_adapter.py    # Neo4j backend (large projects)
+│   │   ├── multi_hop.py        # k-hop, shortest path, community bridges
+│   │   └── queries/            # Tree-sitter .scm query files
+│   ├── graphrag.py             # GraphRAG Engine (Leiden, BAAI/bge-m3, ChromaDB)
+│   ├── code_rag.py             # LangChain ReAct agent
+│   ├── mcp_server.py           # FastMCP server (10 tools)
+│   ├── model_router.py         # ModelRouter + SafeModelRouter
+│   ├── hitl.py                 # Human-in-the-Loop risk classifier
+│   ├── sage.py                 # Long-term memory (event store)
+│   ├── dst.py                  # Dialogue State Tracker (multi-turn)
+│   ├── context_pruner.py       # Token-efficient context management
+│   ├── intent.py               # Lightweight rule-based intent (ask/edit)
+│   └── models.py               # Pydantic: Symbol, Edge, BlastRadiusResult
+├── tests/
+│   └── test_dotcode_graph.py   # Test suite
+├── requirements/               # Dependencies
 └── README.md
 ```
 
@@ -172,10 +227,21 @@ python -m dotcode.mcp_server
 |----------------------|-------------|---------|
 | `DEEPSEEK_API_KEY` | DeepSeek API key | — |
 | `OPENAI_API_KEY` | OpenAI API key | — |
+| `HF_TOKEN` | HuggingFace token (for BAAI/bge-m3) | — |
 | `DOTCODE_BACKEND` | Database backend (`auto`, `sqlite`, `neo4j`) | `auto` |
 | `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
-| `DOTCODE_MODEL_SIMPLE` | Model for simple tasks | `deepseek/deepseek-v4-flash` |
-| `DOTCODE_MODEL_COMPLEX` | Model for complex tasks | `deepseek/deepseek-v4-pro` |
+| `NEO4J_USERNAME` | Neo4j username | `neo4j` |
+| `NEO4J_PASSWORD` | Neo4j password | `password` |
+| `DOTCODE_MODEL_SIMPLE` | Model for simple tasks (comments, docstrings) | `deepseek/deepseek-v4-flash` |
+| `DOTCODE_MODEL_MODERATE` | Model for moderate tasks (add function, small refactor) | `deepseek/deepseek-chat` |
+| `DOTCODE_MODEL_COMPLEX` | Model for complex tasks (multi-file, architect) | `deepseek/deepseek-v4-pro` |
+
+### Backend Auto-selection Logic
+```
+DOTCODE_BACKEND=auto (default):
+  - If existing DB has > 5000 symbols AND NEO4J_URI is set → Neo4j
+  - Otherwise → SQLite (stored at .dotcode/<project-name>.db)
+```
 
 ---
 
@@ -203,6 +269,7 @@ DotCode is licensed under the [Apache License 2.0](LICENSE), the same license as
 
 - [**Aider**](https://github.com/Aider-AI/aider) – The foundation of DotCode's editing engine
 - [**Microsoft GraphRAG**](https://github.com/microsoft/graphrag) – Inspiration for community detection and semantic search
+- [**BAAI/bge-m3**](https://huggingface.co/BAAI/bge-m3) – Multilingual embedding model for semantic search
 - [**colbymchenry/codegraph**](https://github.com/colbymchenry/codegraph) – Reference for knowledge graph construction
 - [**LangChain**](https://langchain.com) – CodeRAG agent orchestration
 
