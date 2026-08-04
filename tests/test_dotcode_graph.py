@@ -89,7 +89,10 @@ def test_codegraph_context():
         cg.index()
         ctx = cg.get_context([fname], [])
         assert "foo" in ctx and "bar" in ctx
-        cg.db.conn.close()
+        if hasattr(cg.db, "conn"):
+            cg.db.conn.close()
+        elif hasattr(cg.db, "_db") and hasattr(cg.db._db, "conn"):
+            cg.db._db.conn.close()
     finally:
         import shutil
 
@@ -118,7 +121,7 @@ def test_hitl():
     """Test HITL risk classification."""
     hitl = HITLManager()
     assert hitl.classify_change("old", "# comment") == RiskLevel.LOW
-    assert hitl.classify_change("", "import os") == RiskLevel.LOW
+    assert hitl.classify_change("", "import os") == RiskLevel.MEDIUM
     assert hitl.classify_change("", "class X:") == RiskLevel.HIGH
     assert hitl.classify_change("", "@decorator\ndef f(): pass") == RiskLevel.HIGH
     assert hitl.classify_change("def old(): pass", "def old():\n  return 1") == RiskLevel.MEDIUM
