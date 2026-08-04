@@ -289,10 +289,14 @@ DotCode includes an automated benchmark suite (`tests/run_benchmark.py`) modeled
 | **Context Pruner Recall Accuracy** | **100.0%** preservation | RAGAS Context Recall |
 | **Intent Classification Accuracy** | **~95-98%** (Online LLM mode) | Intent Classification Precision |
 
-### Run the Benchmark Suite
+### Run the Benchmark & Harness Suite
 
 ```bash
+# Run performance & throughput benchmark
 python tests/run_benchmark.py
+
+# Run Master Harness Suite (Task Eval, RAG Retrieval, Multi-Provider Failover, FastMCP Server)
+python tests/run_harness_suite.py
 ```
 
 ---
