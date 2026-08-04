@@ -20,26 +20,32 @@ class CodeRAG:
 
     def _create_llm(self):
         """Tạo LLM phù hợp dựa trên API key có sẵn."""
-        deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
+        from dotcode.llm_client import DotCodeLLM
+        
+        llm_client = DotCodeLLM.get_instance()
+        provider = llm_client.provider_name
+        model_name = llm_client.get_model("fast")
 
-        if deepseek_key:
+        if provider == "deepseek":
             # Dùng DeepSeek qua ChatOpenAI với base_url
+            clean_model = model_name.split("/")[-1] if "/" in model_name else model_name
             return ChatOpenAI(
-                model="deepseek-v4-flash",
+                model=clean_model,
                 temperature=0,
-                api_key=deepseek_key,
+                api_key=os.getenv("DEEPSEEK_API_KEY"),
                 base_url="https://api.deepseek.com/v1",
             )
-        elif openai_key:
+        elif provider == "openai":
             # Dùng OpenAI
-            return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+            clean_model = model_name.split("/")[-1] if "/" in model_name else model_name
+            return ChatOpenAI(model=clean_model, temperature=0)
         else:
             # Fallback: thử dùng model local qua Ollama
             try:
                 from langchain_ollama import ChatOllama
 
-                return ChatOllama(model="llama3.1:8b", temperature=0)
+                clean_model = model_name.split("/")[-1] if "/" in model_name else "llama3.1:8b"
+                return ChatOllama(model=clean_model, temperature=0)
             except ImportError:
                 raise ValueError(
                     "No API key found. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, or install Ollama."

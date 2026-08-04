@@ -498,3 +498,4 @@ tree-sitter-python
 tree-sitter-rust
 tree-sitter-typescript
 neo4j
+fastmcp

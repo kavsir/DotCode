@@ -246,7 +246,12 @@ class Indexer:
         symbols = []
         lang = HARD_LANGUAGES.get(language)
         if not lang:
-            self._traverse_generic(root_node, file_path, symbols)
+            try:
+                lang = tree_sitter_languages.get_language(language)
+            except Exception:
+                pass
+
+        if not lang:
             return symbols
 
         try:
@@ -266,19 +271,21 @@ class Indexer:
                     if sym:
                         symbols.append(sym)
         except Exception:
-            self._traverse_generic(root_node, file_path, symbols)
+            pass
         return symbols
 
     def _extract_symbols(self, root_node, file_path: str, language: str = "python"):
         symbols = []
-        # print(f"DEBUG _extract_symbols: language={language}, file_path={file_path[:50]}")
+        query_str = self._get_query(language)
+        if query_str:
+            symbols = self._extract_symbols_with_query(root_node, file_path, query_str, language)
+            if symbols:
+                return symbols
+
         if language == "python":
-            # print("  -> Using _traverse_for_symbols")
             self._traverse_for_symbols(root_node, file_path, symbols, parent_class=None)
         else:
-            # print("  -> Using _traverse_generic")
             self._traverse_generic(root_node, file_path, symbols, parent_class=None)
-        # print(f"  -> Symbols found: {len(symbols)}")
         return symbols
 
     # ========== GENERIC TRAVERSAL (FALLBACK) ==========
@@ -523,7 +530,10 @@ class Indexer:
         """Lấy danh sách các module được import trong file."""
         imports = set()
         # Parse imports từ AST
-        code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        full_path = os.path.join(self.root, file_path) if not os.path.isabs(file_path) else file_path
+        if not os.path.exists(full_path):
+            return imports
+        code = Path(full_path).read_text(encoding="utf-8", errors="ignore")
         tree = PY_PARSER.parse(bytes(code, "utf-8"))
         self._collect_imports(tree.root_node, imports)
         return imports

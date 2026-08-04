@@ -1,4 +1,7 @@
 import os
+os.environ["DEEPSEEK_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +24,10 @@ class TestCoder(unittest.TestCase):
         self.GPT35 = Model("gpt-3.5-turbo")
         self.webbrowser_patcher = patch("aider.io.webbrowser.open")
         self.mock_webbrowser = self.webbrowser_patcher.start()
+        
+        self.router_patcher = patch("dotcode.model_router.SafeModelRouter.get_safe_model")
+        self.mock_router = self.router_patcher.start()
+        self.mock_router.return_value = "gpt-3.5-turbo"
 
     def test_allowed_to_edit(self):
         with GitTemporaryDirectory():

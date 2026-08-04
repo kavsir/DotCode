@@ -1,13 +1,14 @@
 """
 Model Router - Tự động chọn LLM dựa trên độ phức tạp của task.
-Hỗ trợ DeepSeek V4 (flash/pro), GPT-4o-mini, và local models.
+Hỗ trợ đa nhà cung cấp (DeepSeek, OpenAI, Anthropic, Gemini, Groq, Ollama).
 Bao gồm SafeModelRouter với cơ chế an toàn khi chuyển model.
 """
 
-import os
 import re
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional
+
+from dotcode.llm_client import DotCodeLLM
 
 
 class TaskComplexity(Enum):
@@ -16,14 +17,17 @@ class TaskComplexity(Enum):
     COMPLEX = "complex"  # Multi-file changes, architect, debug sâu
 
 
+# Mapping từ TaskComplexity sang LLM tier
+COMPLEXITY_TO_TIER = {
+    TaskComplexity.SIMPLE: "fast",
+    TaskComplexity.MODERATE: "main",
+    TaskComplexity.COMPLEX: "strong",
+}
+
+
 class ModelRouter:
     def __init__(self):
-        # Cấu hình model cho từng mức độ phức tạp
-        self.model_map = {
-            TaskComplexity.SIMPLE: os.getenv("DOTCODE_MODEL_SIMPLE", "deepseek/deepseek-v4-flash"),
-            TaskComplexity.MODERATE: os.getenv("DOTCODE_MODEL_MODERATE", "deepseek/deepseek-chat"),
-            TaskComplexity.COMPLEX: os.getenv("DOTCODE_MODEL_COMPLEX", "deepseek/deepseek-v4-pro"),
-        }
+        self.llm = DotCodeLLM.get_instance()
 
         # Ngưỡng token để phân loại
         self.simple_max_tokens = 500
@@ -84,14 +88,24 @@ class ModelRouter:
             return TaskComplexity.MODERATE
 
     def get_model_for_task(self, message: str, context_tokens: int = 0) -> str:
+        """Get model name based on task complexity. Respects auto/manual mode."""
+        if self.llm.mode == "manual":
+            return self.llm.get_model()
+
         complexity = self.classify_task(message, context_tokens)
-        return self.model_map[complexity]
+        tier = COMPLEXITY_TO_TIER[complexity]
+        return self.llm.get_model(tier)
 
     def get_complexity(self, message: str, context_tokens: int = 0) -> TaskComplexity:
         return self.classify_task(message, context_tokens)
 
     def get_all_models(self) -> dict:
-        return {k.value: v for k, v in self.model_map.items()}
+        """Return current model mapping for all tiers."""
+        return {
+            "fast": self.llm.get_model("fast"),
+            "main": self.llm.get_model("main"),
+            "strong": self.llm.get_model("strong"),
+        }
 
 
 class SafeModelRouter(ModelRouter):
@@ -105,6 +119,10 @@ class SafeModelRouter(ModelRouter):
         self.cache_warmed = False
 
     def should_switch_model(self, intent: str, context_tokens: int) -> bool:
+        # Manual mode: never auto-switch
+        if self.llm.mode == "manual":
+            return False
+
         if intent == "command":
             return False
 
@@ -117,14 +135,22 @@ class SafeModelRouter(ModelRouter):
         return True
 
     def get_safe_model(self, message: str, intent: str, context_tokens: int = 0) -> str:
+        """Get the appropriate model, respecting safety constraints and mode."""
+        # Manual mode: always use user's chosen model
+        if self.llm.mode == "manual":
+            self.current_model = self.llm.get_model()
+            return self.current_model
+
+        # Auto mode logic
         if intent in ("question", "search") and context_tokens < 10000:
-            return self.model_map[TaskComplexity.SIMPLE]
+            return self.llm.get_model("fast")
 
         if self.should_switch_model(intent, context_tokens):
             complexity = self.classify_task(message, context_tokens)
-            selected = self.model_map[complexity]
+            tier = COMPLEXITY_TO_TIER[complexity]
+            selected = self.llm.get_model(tier)
         else:
-            selected = self.model_map[TaskComplexity.COMPLEX]
+            selected = self.llm.get_model("strong")
 
         self.current_model = selected
         return selected

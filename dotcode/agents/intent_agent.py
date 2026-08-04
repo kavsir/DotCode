@@ -3,11 +3,10 @@ Intent Agent - Sử dụng LLM để phân loại ý định người dùng.
 Linh hoạt với mọi ngôn ngữ, không phụ thuộc regex cứng.
 """
 
-import os
 import re
 from typing import Tuple
 
-import requests
+from dotcode.llm_client import DotCodeLLM
 
 
 class IntentAgent:
@@ -16,52 +15,8 @@ class IntentAgent:
 
     def is_ambiguous(self, text: str) -> bool:
         """Phát hiện input quá ngắn hoặc không rõ ràng."""
-        if not text:
+        if not text or not text.strip():
             return True
-
-        words = text.strip().split()
-
-        # Input cực ngắn (1-2 từ) và không có dấu hiệu câu hỏi → ambiguous
-        if len(words) <= 2:
-            question_indicators = [
-                "?",
-                "ai",
-                "gì",
-                "nào",
-                "sao",
-                "đâu",
-                "what",
-                "how",
-                "why",
-                "where",
-                "when",
-                "which",
-                "who",
-                "tìm",
-                "search",
-                "find",
-                "list",
-                "show",
-                "thêm",
-                "add",
-                "tạo",
-                "create",
-                "sửa",
-                "fix",
-                "xóa",
-                "có",
-                "is",
-                "are",
-                "does",
-                "do",
-                "can",
-            ]
-            text_lower = text.lower()
-            has_indicator = any(indicator in text_lower for indicator in question_indicators)
-
-            if not has_indicator:
-                return True
-
         return False
 
     def classify(self, text: str) -> Tuple[str, float]:
@@ -88,10 +43,6 @@ class IntentAgent:
 
     def _llm_classify(self, text: str) -> Tuple[str, float]:
         """Dùng LLM để phân loại intent."""
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            return "unknown", 0.0
-
         prompt = f"""Classify the user input into exactly one of these intents:
 - question: asking about code (what, why, how, explain, describe...)
 - search: searching for code (find, locate, list, search, where...)
@@ -104,23 +55,15 @@ User input: "{text}"
 Respond with exactly one word (question, search, command, architecture, ambiguous)."""
 
         try:
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model_name,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 10,
-                    "temperature": 0.0,
-                },
-                timeout=10,
+            llm = DotCodeLLM.get_instance()
+            response_text = llm.complete(
+                prompt=prompt,
+                tier="fast",
+                max_tokens=10,
+                temperature=0.0,
             )
-            if response.status_code == 200:
-                data = response.json()
-                intent = data["choices"][0]["message"]["content"].strip().lower()
+            if response_text:
+                intent = response_text.strip().lower()
                 # Chuẩn hóa intent
                 valid_intents = ["question", "search", "command", "architecture", "ambiguous"]
                 if intent in valid_intents:

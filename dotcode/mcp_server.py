@@ -59,6 +59,7 @@ async def get_callees(symbol_name: str) -> List[dict]:
     return []
 
 
+@mcp.tool()
 async def get_callers(symbol_name: str) -> List[dict]:
     """Lấy danh sách symbols gọi đến symbol (chấp nhận tên đơn giản hoặc ID đầy đủ)."""
     cg = get_code_graph()
@@ -76,24 +77,6 @@ async def get_callers(symbol_name: str) -> List[dict]:
 
     return []
 
-
-@mcp.tool()
-async def get_blast_radius(symbol_id: str, max_depth: int = 3) -> dict:
-    """
-    Phân tích tác động: xác định tất cả các symbols bị ảnh hưởng khi thay đổi symbol này.
-
-    Args:
-        symbol_id: ID của symbol cần phân tích
-        max_depth: Độ sâu tối đa khi duyệt đồ thị (mặc định: 3)
-
-    Returns:
-        BlastRadiusResult chứa direct_callers, indirect_callers, callees, subclasses.
-    """
-    cg = get_code_graph()
-    result = cg.get_blast_radius(symbol_id, max_depth)
-    if result:
-        return result.model_dump()
-    return {"error": "Symbol not found"}
 
 
 @mcp.tool()
@@ -114,17 +97,6 @@ async def search_code(query: str, kind: str = None, limit: int = 10) -> List[dic
     return [sym.model_dump() for sym in symbols]
 
 
-@mcp.tool()
-async def get_unused_symbols() -> List[dict]:
-    """
-    Phát hiện dead code: trả về danh sách các symbols không được gọi bởi bất kỳ symbol nào khác.
-
-    Returns:
-        Danh sách các symbols có khả năng là dead code.
-    """
-    cg = get_code_graph()
-    symbols = cg.get_unused_symbols()
-    return [sym.model_dump() for sym in symbols]
 
 
 @mcp.tool()

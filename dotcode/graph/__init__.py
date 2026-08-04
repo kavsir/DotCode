@@ -386,8 +386,9 @@ class CodeGraph:
                         embeddings=embeddings, documents=texts, metadatas=metadatas, ids=ids
                     )
             # Unified Feedback Loop: luôn cập nhật communities sau khi code thay đổi
-        self.graphrag.detect_communities()
-        self.graphrag.summarize_communities()
+        if self.graphrag:
+            self.graphrag.detect_communities()
+            self.graphrag.summarize_communities()
 
     def get_blast_radius(self, symbol_id: str, max_depth: int = 3) -> Optional[BlastRadiusResult]:
         if not self.db:
