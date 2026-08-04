@@ -1351,7 +1351,6 @@ Chỉ trả về JSON hợp lệ."""
                 
         file_mentions = self.get_file_mentions(message)
         for rel_fname in file_mentions:
-            import os
             abs_fname = self.abs_root_path(rel_fname)
             if os.path.exists(abs_fname):
                 file_symbols = self.code_graph.db.get_symbols_in_file(rel_fname)

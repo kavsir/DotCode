@@ -331,7 +331,7 @@ class DotCodeLLM:
         """Human-readable status string."""
         status = self.get_status()
         lines = [
-            f"[DotCode LLM Status]",
+            "[DotCode LLM Status]",
             f"   Mode: {'Auto' if status['mode'] == 'auto' else 'Manual'}",
             f"   Provider: {status['provider'].upper()}",
         ]
