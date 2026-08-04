@@ -2,11 +2,12 @@
 DotCode Master Harness Suite Runner
 ===================================
 Bộ nhà điều phối trung tâm (Master Orchestrator) tự động kích hoạt
-và tổng hợp báo cáo của toàn bộ 4 bộ khung Harness trong dự án DotCode:
+và tổng hợp báo cáo của toàn bộ 5 bộ khung Harness trong dự án DotCode:
 1. Task Evaluation Harness (Pass@1 Resolution Rate)
 2. Context & RAG Retrieval Harness (Context Recall & Compression Ratio)
 3. Multi-Provider Failover & Resilience Harness (API Health & Failover Rate)
 4. FastMCP Server & Tool Integration Harness (Schema Validation Rate)
+5. Live Coding & Patch Safety Harness (AST Syntax & Risk Verification)
 """
 
 import sys
@@ -22,11 +23,12 @@ from dotcode.harness import (
     DotCodeRetrievalHarness,
     DotCodeProviderHarness,
     DotCodeMCPHarness,
+    DotCodeCodingHarness,
 )
 
 
 def run_master_harness_suite() -> Dict[str, Any]:
-    """Chạy toàn bộ 4 bộ Harness và tổng hợp báo cáo Master Scorecard."""
+    """Chạy toàn bộ 5 bộ Harness và tổng hợp báo cáo Master Scorecard."""
     start_time = time.time()
 
     print("=" * 70)
@@ -53,9 +55,14 @@ def run_master_harness_suite() -> Dict[str, Any]:
     mcp_harness.load_default_tasks()
     mcp_summary = mcp_harness.run_all()
 
+    # 5. Run Live Coding Patch Harness
+    coding_harness = DotCodeCodingHarness()
+    coding_harness.load_default_tasks()
+    coding_summary = coding_harness.run_all()
+
     total_duration_s = time.time() - start_time
 
-    # 5. Build Master Scorecard Summary
+    # 6. Build Master Scorecard Summary
     master_summary = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "total_duration_s": round(total_duration_s, 2),
@@ -64,6 +71,7 @@ def run_master_harness_suite() -> Dict[str, Any]:
         "retrieval_token_compression": retrieval_summary["avg_compression_pct"],
         "provider_resilience_rate": provider_summary["resilience_rate_pct"],
         "mcp_schema_valid_rate": mcp_summary["schema_valid_rate_pct"],
+        "coding_valid_ast_rate": coding_summary["valid_ast_rate_pct"],
     }
 
     print_master_scorecard(master_summary)
@@ -82,6 +90,7 @@ def print_master_scorecard(summary: Dict[str, Any]):
     print(f" 3. Context Pruner Compression:          {summary['retrieval_token_compression']}% Token Saved")
     print(f" 4. Multi-Provider API Resilience:       {summary['provider_resilience_rate']}% Available & Failover")
     print(f" 5. FastMCP Server & Tools Validation:   {summary['mcp_schema_valid_rate']}% Schema Passed")
+    print(f" 6. Live Coding & Patch Safety Shield:   {summary['coding_valid_ast_rate']}% AST Valid Rate")
     print("-" * 70)
     
     # Calculate Overall Master Score
@@ -90,7 +99,8 @@ def print_master_scorecard(summary: Dict[str, Any]):
         + summary["retrieval_context_recall"]
         + summary["provider_resilience_rate"]
         + summary["mcp_schema_valid_rate"]
-    ) / 4.0
+        + summary["coding_valid_ast_rate"]
+    ) / 5.0
 
     print(f" 🌟 ĐIỂM CHẤT LƯỢNG TỔNG THỂ (MASTER GRADE): {round(overall_score, 2)} / 100.0%")
     print("=" * 70)

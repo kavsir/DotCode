@@ -16,6 +16,11 @@ from dotcode.harness.mcp_harness import (
     MCPTask,
     MCPResult,
 )
+from dotcode.harness.coding_harness import (
+    DotCodeCodingHarness,
+    CodingPatchTask,
+    CodingPatchResult,
+)
 
 __all__ = [
     "DotCodeRetrievalHarness",
@@ -27,4 +32,7 @@ __all__ = [
     "DotCodeMCPHarness",
     "MCPTask",
     "MCPResult",
+    "DotCodeCodingHarness",
+    "CodingPatchTask",
+    "CodingPatchResult",
 ]
