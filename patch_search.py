@@ -1,21 +1,21 @@
+import ast
 import re
 
 with open("aider/coders/base_coder.py", "r", encoding="utf-8") as f:
     content = f.read()
 
-# We need to replace the entire _handle_search function.
-# Let's find its start and end.
-import ast
+
 class FuncFinder(ast.NodeVisitor):
     def __init__(self):
         self.start = None
         self.end = None
-    
+
     def visit_FunctionDef(self, node):
         if node.name == "_handle_search":
             self.start = node.lineno
             self.end = getattr(node, "end_lineno", None)
         self.generic_visit(node)
+
 
 tree = ast.parse(content)
 finder = FuncFinder()
@@ -66,7 +66,7 @@ Chỉ trả về JSON hợp lệ.\"\"\"
             if self.code_graph.graphrag and not self.code_graph.graphrag.communities:
                 self.code_graph.graphrag.detect_communities()
                 self.code_graph.graphrag.summarize_communities()
-                
+
             if self.code_graph.graphrag and self.code_graph.graphrag.communities:
                 name1 = search_params["entity1"]
                 name2 = search_params["entity2"]
@@ -119,7 +119,7 @@ Chỉ trả về JSON hợp lệ.\"\"\"
                 if sym_id not in seen_ids:
                     seen_ids.add(sym_id)
                     all_symbols.append(sym)
-                    
+
         if hasattr(self.code_graph, "graphrag") and self.code_graph.graphrag:
             try:
                 semantic_results = self.code_graph.graphrag.semantic_search(message, limit=10, boost_pagerank=True)
@@ -136,10 +136,9 @@ Chỉ trả về JSON hợp lệ.\"\"\"
                             all_symbols.append(detail)
             except Exception as e:
                 self.io.tool_output(f"🔍 Semantic search error: {e}")
-                
+
         file_mentions = self.get_file_mentions(message)
         for rel_fname in file_mentions:
-            import os
             abs_fname = self.abs_root_path(rel_fname)
             if os.path.exists(abs_fname):
                 file_symbols = self.code_graph.db.get_symbols_in_file(rel_fname)
@@ -148,7 +147,7 @@ Chỉ trả về JSON hợp lệ.\"\"\"
                     if sym_id not in seen_ids:
                         seen_ids.add(sym_id)
                         all_symbols.append(sym)
-                        
+
         kind_filter = search_params.get("kind_filter")
         if kind_filter and all_symbols:
             filtered = []
@@ -163,7 +162,7 @@ Chỉ trả về JSON hợp lệ.\"\"\"
                 elif s_kind == kind_filter:
                     filtered.append(s)
             all_symbols = filtered
-            
+
         if all_symbols:
             def get_score(sym):
                 if isinstance(sym, dict):
@@ -175,7 +174,7 @@ Chỉ trả về JSON hợp lệ.\"\"\"
                 if combined is not None and combined > 0:
                     return combined
                 return pagerank if pagerank is not None else 0.0
-                
+
             all_symbols.sort(key=get_score, reverse=True)
             self.io.tool_output(f"🔍 Found {len(all_symbols)} results:")
             for sym in all_symbols[:10]:
