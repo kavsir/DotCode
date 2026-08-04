@@ -10,7 +10,7 @@ import time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
+from dotcode.llm_client import DotCodeLLM
 from pydantic import BaseModel, Field
 
 
@@ -75,10 +75,6 @@ class DialogueStateTracker:
 
     def _llm_detect_question(self, ai_response: str) -> DialogueState:
         """Gọi LLM nhẹ để phân tích câu trả lời của AI."""
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            return DialogueState()
-
         prompt = f"""Phân tích câu trả lời AI sau. Nếu AI đang đặt câu hỏi chờ user trả lời,
 trả về JSON:
 {{
@@ -92,23 +88,15 @@ AI response: {ai_response[:500]}
 Chỉ trả JSON, không giải thích."""
 
         try:
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 100,
-                    "temperature": 0.0,
-                },
-                timeout=10,
+            llm = DotCodeLLM.get_instance()
+            content = llm.complete(
+                prompt=prompt,
+                tier="fast",
+                max_tokens=100,
+                temperature=0.0
             )
-            if response.status_code == 200:
-                data = response.json()
-                content = data["choices"][0]["message"]["content"].strip()
+            if content:
+                content = content.strip()
                 # Parse JSON từ LLM response
                 parsed = json.loads(content)
                 question_type = None
@@ -169,32 +157,31 @@ Chỉ trả JSON, không giải thích."""
             result = {"is_shift": False, "resolution": "no"}
         else:
             # LLM Phân tích
-            api_key = os.getenv("DEEPSEEK_API_KEY")
             result = {"is_shift": len(user_input.split()) > 10, "resolution": "unknown"}
-            if api_key:
-                prompt = f"""AI đã hỏi: "{self.state.question_text}"\nNgười dùng trả lời: "{user_input}"\n
+            prompt = f"""AI đã hỏi: "{self.state.question_text}"\nNgười dùng trả lời: "{user_input}"\n
 Nhiệm vụ:
 1. is_shift (true/false): Người dùng có phớt lờ câu hỏi và chuyển sang lệnh/chủ đề khác không?
 2. resolution ("yes", "no", "option", "unknown"): Nếu không shift, ý người dùng là đồng ý (yes), từ chối (no), hay không rõ (unknown).
 Trả về đúng 1 JSON: {{"is_shift": bool, "resolution": str}}"""
-                try:
-                    response = requests.post(
-                        "https://api.deepseek.com/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50, "temperature": 0.0},
-                        timeout=10,
-                    )
-                    if response.status_code == 200:
-                        content = response.json()["choices"][0]["message"]["content"].strip()
-                        if "```json" in content: content = content.split("```json")[1].split("```")[0].strip()
-                        elif "```" in content: content = content.split("```")[1].split("```")[0].strip()
-                        parsed = json.loads(content)
-                        result = {
-                            "is_shift": parsed.get("is_shift", False),
-                            "resolution": parsed.get("resolution", "unknown")
-                        }
-                except Exception:
-                    pass
+            try:
+                llm = DotCodeLLM.get_instance()
+                content = llm.complete(
+                    prompt=prompt,
+                    tier="fast",
+                    max_tokens=50,
+                    temperature=0.0
+                )
+                if content:
+                    content = content.strip()
+                    if "```json" in content: content = content.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content: content = content.split("```")[1].split("```")[0].strip()
+                    parsed = json.loads(content)
+                    result = {
+                        "is_shift": parsed.get("is_shift", False),
+                        "resolution": parsed.get("resolution", "unknown")
+                    }
+            except Exception:
+                pass
 
         # Lưu cache
         self.state._last_analysis = {"input": user_input, "result": result}

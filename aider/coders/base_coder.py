@@ -764,15 +764,18 @@ class Coder:
         chat_files = set(self.abs_fnames) | repo_abs_read_only_fnames
         other_files = all_abs_files - chat_files
 
-        repo_content = self.repo_map.get_repo_map(
-            chat_files,
-            other_files,
-            mentioned_fnames=mentioned_fnames,
-            mentioned_idents=mentioned_idents,
-            force_refresh=force_refresh,
-        )
+        if self.repo_map:
+            repo_content = self.repo_map.get_repo_map(
+                chat_files,
+                other_files,
+                mentioned_fnames=mentioned_fnames,
+                mentioned_idents=mentioned_idents,
+                force_refresh=force_refresh,
+            )
+        else:
+            repo_content = ""
 
-        if not repo_content:
+        if not repo_content and self.repo_map:
             repo_content = self.repo_map.get_repo_map(
                 set(),
                 all_abs_files,
@@ -780,7 +783,7 @@ class Coder:
                 mentioned_idents=mentioned_idents,
             )
 
-        if not repo_content:
+        if not repo_content and self.repo_map:
             repo_content = self.repo_map.get_repo_map(set(), all_abs_files)
 
         return repo_content
@@ -1004,14 +1007,10 @@ class Coder:
         # DotCode: Sử dụng Intent Agent để phân loại
         intent, confidence = self.intent_agent.classify(message)
 
+
+
         if intent == "ambiguous":
-            self.io.tool_output(
-                "🤔 Your request is ambiguous. Could you please clarify what you want me to do?"
-            )
-            self.io.tool_output("   For example:")
-            self.io.tool_output("   - 'Explain what greet does'")
-            self.io.tool_output("   - 'Add a docstring to greet'")
-            self.io.tool_output("   - 'Show me the definition of greet'")
+            self._handle_command(message, is_ambiguous=True)
             return
 
         if intent == "command":
@@ -1255,30 +1254,25 @@ class Coder:
 
         # ===== DotCode: Phân tích ngữ nghĩa tìm kiếm với LLM =====
         search_params = {"is_bridge": False, "entity1": None, "entity2": None, "kind_filter": None}
-        import os, requests, json
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if api_key:
-            prompt = f"""Phân tích yêu cầu tìm kiếm sau của lập trình viên: "{message}"
+        import json
+        from dotcode.llm_client import DotCodeLLM
+
+        prompt = f"""Phân tích yêu cầu tìm kiếm sau của lập trình viên: "{message}"
 Trả về JSON chứa các key:
 - "is_bridge" (bool): true nếu người dùng đang hỏi về MỐI QUAN HỆ, TƯƠNG TÁC, KẾT NỐI giữa 2 module/component/hàm khác nhau.
 - "entity1" (str): Tên thành phần thứ nhất (nếu is_bridge = true).
 - "entity2" (str): Tên thành phần thứ hai (nếu is_bridge = true).
 - "kind_filter" (str hoặc null): Loại thành phần mà người dùng muốn tìm (chỉ chọn từ: "class", "function", "variable", "interface", "method"), nếu không có thì để null.
 Chỉ trả về JSON hợp lệ."""
-            try:
-                response = requests.post(
-                    "https://api.deepseek.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 100, "temperature": 0.0},
-                    timeout=10,
-                )
-                if response.status_code == 200:
-                    c = response.json()["choices"][0]["message"]["content"].strip()
-                    if "```json" in c: c = c.split("```json")[1].split("```")[0].strip()
-                    elif "```" in c: c = c.split("```")[1].split("```")[0].strip()
-                    search_params.update(json.loads(c))
-            except Exception:
-                pass
+        try:
+            llm = DotCodeLLM.get_instance()
+            c = llm.complete(prompt=prompt, tier="fast", max_tokens=100, temperature=0.0)
+            if c:
+                if "```json" in c: c = c.split("```json")[1].split("```")[0].strip()
+                elif "```" in c: c = c.split("```")[1].split("```")[0].strip()
+                search_params.update(json.loads(c))
+        except Exception:
+            pass
 
         if search_params.get("is_bridge") and search_params.get("entity1") and search_params.get("entity2"):
             if self.code_graph.graphrag and not self.code_graph.graphrag.communities:
@@ -3055,7 +3049,7 @@ Chỉ trả về JSON hợp lệ."""
             self.io.tool_output(f"Added {num_lines} {line_plural} of output to the chat.")
             return accumulated_output
 
-    def _handle_command(self, message):
+    def _handle_command(self, message: str, is_ambiguous: bool = False):
         """Xử lý command: tự động thêm file liên quan, chuyển sang editable, và thêm Special Note vào system prompt."""
         # Tự động thêm file liên quan (vào read-only trước)
         added_files = self._auto_add_context(message, max_files=3)
@@ -3087,6 +3081,15 @@ Chỉ trả về JSON hợp lệ."""
     DO NOT question whether you can edit them. Just proceed with the SEARCH/REPLACE block immediately.
     Focus ONLY on the user's request. Do not explain, do not think about file permissions.
     """
+        if is_ambiguous:
+            special_note += (
+                "\n\n**⚠️ AMBIGUITY ALERT:**\n"
+                "The user's request is very broad, vague, or lacks sufficient context (e.g., 'make a game', 'build an app'). "
+                "DO NOT attempt to write code immediately or guess the requirements. "
+                "Instead, act as an expert Product Manager and ask 1-3 concise, clarifying questions to gather exact requirements, architecture preferences, and design choices. "
+                "Wait for the user's response before proceeding with implementation."
+            )
+
         self.gpt_prompts.main_system = saved_prompt + special_note
 
         try:

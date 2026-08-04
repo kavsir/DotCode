@@ -11,6 +11,7 @@ from chromadb.config import Settings
 from huggingface_hub import login
 from sentence_transformers import SentenceTransformer
 
+from dotcode.llm_client import DotCodeLLM, HybridEmbedder
 
 
 class GraphRAGEngine:
@@ -26,15 +27,18 @@ class GraphRAGEngine:
             except Exception:
                 pass
 
-        # Embedding model
-        self.model_name = "BAAI/bge-m3"
-        self._model = SentenceTransformer(self.model_name, token=hf_token, trust_remote_code=True)
+        # Hybrid Embedding model (Cloud priority, CPU fallback)
+        self._model = HybridEmbedder("BAAI/bge-m3", hf_token)
 
         # ChromaDB cho vector search
         chroma_dir = os.path.join(root, ".dotcode", "chroma")
         os.makedirs(chroma_dir, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(path=chroma_dir)
-        self.collection = self.chroma_client.get_or_create_collection("code_symbols")
+        
+        # Tạo collection riêng theo loại embedder để không lẫn lộn vector cloud/local
+        cloud_model = self._model.llm.get_embedding_model()
+        collection_name = "code_symbols_" + cloud_model.replace("/", "_").replace("-", "_").replace(":", "_")
+        self.collection = self.chroma_client.get_or_create_collection(collection_name)
 
         # Community data (in-memory)
         self.communities: Dict[int, Dict] = {}
@@ -42,8 +46,6 @@ class GraphRAGEngine:
 
     @property
     def model(self):
-        if self._model is None:
-            self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
         return self._model
 
     # ==================== COMMUNITY DETECTION ====================
@@ -119,13 +121,7 @@ class GraphRAGEngine:
 
     def _llm_summarize_community(self, node_info: list) -> str:
         """Dùng LLM để tạo tóm tắt có ý nghĩa cho community."""
-        import os
-
-        import requests
-
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            return self._rule_summarize_community_fallback(node_info)
+        from dotcode.llm_client import DotCodeLLM
 
         symbols_text = "\n".join(node_info[:10])
 
@@ -142,20 +138,15 @@ class GraphRAGEngine:
     Summary:"""
 
         try:
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 150,
-                    "temperature": 0.3,
-                },
-                timeout=15,
+            llm = DotCodeLLM.get_instance()
+            response_text = llm.complete(
+                prompt=prompt,
+                tier="fast",
+                max_tokens=150,
+                temperature=0.3,
             )
-            if response.status_code == 200:
-                data = response.json()
-                return data["choices"][0]["message"]["content"].strip()
+            if response_text:
+                return response_text.strip()
             else:
                 return self._rule_summarize_community_fallback(node_info)
         except Exception:
