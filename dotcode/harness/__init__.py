@@ -11,6 +11,11 @@ from dotcode.harness.provider_harness import (
     ProviderTask,
     ProviderResult,
 )
+from dotcode.harness.mcp_harness import (
+    DotCodeMCPHarness,
+    MCPTask,
+    MCPResult,
+)
 
 __all__ = [
     "DotCodeRetrievalHarness",
@@ -19,4 +24,7 @@ __all__ = [
     "DotCodeProviderHarness",
     "ProviderTask",
     "ProviderResult",
+    "DotCodeMCPHarness",
+    "MCPTask",
+    "MCPResult",
 ]
